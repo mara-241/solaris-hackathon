@@ -39,6 +39,12 @@ All major agent outputs include:
 ## Delivery sequence
 1. Contracts and API skeleton (done)
 2. Adapter integration stubs (in progress)
-3. DB writes in orchestrator (next)
+3. Persistence layer enabled (SQLite now, Postgres next)
 4. Golden-path integration tests (next)
 5. Demo script + canned scenarios (next)
+
+## Architecture optimizations applied
+- Parallelized independent data branches (Perception + Spatial VLM) in orchestrator.
+- Added runtime step telemetry (`agent_steps`, duration) for observability and judge-friendly explainability.
+- Added API persistence abstraction with SQLite backing for immediate run retrieval (`/run/{id}`).
+- Kept Postgres DDL scaffold in `db/schema.sql` for production migration path.

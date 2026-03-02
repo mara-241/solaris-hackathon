@@ -12,3 +12,5 @@ def test_pipeline_returns_expected_sections():
     assert "optimization_result" in out["outputs"]
     assert out["outputs"]["quality"]["confidence"] >= 0
     assert "evidence_pack" in out
+    assert "runtime" in out
+    assert len(out["runtime"]["agent_steps"]) >= 3
