@@ -1,21 +1,87 @@
 from __future__ import annotations
 
+import json
+import math
 import os
+from pathlib import Path
 
 from agents.energy_optimization.impact import compute_impact_metrics
 
 
-def _nn_predict_stub(feature_context: dict) -> tuple[float | None, dict]:
-    """NN v1 placeholder with explicit fallback semantics.
+def _one_hot(value: str, classes: list[str]) -> list[float]:
+    return [1.0 if value == c else 0.0 for c in classes]
 
-    If DEMAND_NN_ENABLED=true and model exists, this should be replaced with real inference.
-    """
+
+def _build_feature_vector(feature_context: dict) -> list[float]:
+    perception = feature_context.get("perception", {})
+    spatial = feature_context.get("spatial", {})
+
+    weather = perception.get("weather", {})
+    demographics = perception.get("demographics", {})
+    baselines = perception.get("baselines", {})
+    summaries = spatial.get("feature_summaries", {})
+
+    usage = baselines.get("usage_profile", "mixed")
+    density = summaries.get("settlement_density", "unknown")
+
+    return [
+        float(weather.get("rain_risk", 0.3)),
+        float(weather.get("sun_hours", 4.5)),
+        float(demographics.get("households", 100)),
+        *_one_hot(usage, ["mixed", "productive-use-heavy", "residential"]),
+        float(summaries.get("roof_count_estimate", demographics.get("households", 100))),
+        float(summaries.get("ndvi_mean", 0.35)),
+        *_one_hot(density, ["low", "medium", "high", "unknown"]),
+    ]
+
+
+def _relu(vec: list[float]) -> list[float]:
+    return [max(0.0, v) for v in vec]
+
+
+def _dense(x: list[float], w: list[list[float]], b: list[float]) -> list[float]:
+    out: list[float] = []
+    for row, bias in zip(w, b):
+        out.append(sum(v * rw for v, rw in zip(x, row)) + bias)
+    return out
+
+
+def _mlp_forward(x: list[float], model: dict) -> float:
+    mu = model["normalization"]["mean"]
+    sigma = model["normalization"]["std"]
+    xn = [(v - m) / (s if s != 0 else 1.0) for v, m, s in zip(x, mu, sigma)]
+
+    l1 = _relu(_dense(xn, model["layers"][0]["weights"], model["layers"][0]["bias"]))
+    l2 = _relu(_dense(l1, model["layers"][1]["weights"], model["layers"][1]["bias"]))
+    y = _dense(l2, model["layers"][2]["weights"], model["layers"][2]["bias"])[0]
+    return max(0.0, float(y))
+
+
+def _nn_predict(feature_context: dict) -> tuple[float | None, dict]:
     enabled = os.getenv("DEMAND_NN_ENABLED", "false").lower() == "true"
-    model_path = os.getenv("DEMAND_NN_MODEL_PATH", "artifacts/models/demand_nn_v1.pt")
-    if enabled and os.path.exists(model_path):
-        # Placeholder for future torch inference.
-        return None, {"model_input_version": "v1", "nn_used": False, "nn_fallback_reason": "stub_not_implemented"}
-    return None, {"model_input_version": "v1", "nn_used": False, "nn_fallback_reason": "model_unavailable"}
+    model_path = Path(os.getenv("DEMAND_NN_MODEL_PATH", "docs/models/demand_nn_v1.weights.json"))
+
+    if not enabled:
+        return None, {"model_input_version": "v1", "nn_used": False, "nn_fallback_reason": "nn_disabled"}
+    if not model_path.exists():
+        return None, {"model_input_version": "v1", "nn_used": False, "nn_fallback_reason": "model_unavailable"}
+
+    try:
+        model = json.loads(model_path.read_text())
+        x = _build_feature_vector(feature_context)
+        pred = _mlp_forward(x, model)
+        return round(pred, 2), {
+            "model_input_version": model.get("model_input_version", "v1"),
+            "nn_used": True,
+            "nn_model": model.get("model_name", "demand_nn_v1"),
+            "nn_fallback_reason": None,
+        }
+    except Exception as exc:
+        return None, {
+            "model_input_version": "v1",
+            "nn_used": False,
+            "nn_fallback_reason": f"inference_error:{type(exc).__name__}",
+        }
 
 
 def optimize_energy_plan(feature_context: dict) -> dict:
@@ -27,7 +93,7 @@ def optimize_energy_plan(feature_context: dict) -> dict:
     rain_risk = perception.get("weather", {}).get("rain_risk", 0.3)
     households = int(perception.get("demographics", {}).get("households", 100))
 
-    nn_prediction, model_meta = _nn_predict_stub(feature_context)
+    nn_prediction, model_meta = _nn_predict(feature_context)
 
     weather_factor = 1.0 + max(0.0, (4.5 - sun_hours) * 0.06) + (rain_risk * 0.03)
     heuristic_demand = round(baseline * weather_factor, 2)
