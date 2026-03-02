@@ -25,3 +25,4 @@ def test_pipeline_degrades_when_spatial_agent_fails(monkeypatch):
     assert any("spatial_error" in e for e in out["runtime"]["errors"])
     assert "spatial_error" in out["outputs"]["feature_context"]["quality_flags"]
     assert out["outputs"]["quality"]["fallback_used"] is True
+    assert "impact_metrics" in out["outputs"]
