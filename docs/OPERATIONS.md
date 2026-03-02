@@ -10,10 +10,12 @@ This playbook mirrors the agent-swarm workflow without tmux complexity.
 ## Core Loop
 1. Create/update task in `active-tasks.json`.
 2. Spawn specialist agent for one task only.
-3. Agent updates branch + opens/updates PR.
-4. Run CI + review.
-5. Merge if Definition of Done is met.
-6. Update task state to `done`.
+3. Agent updates branch locally.
+4. Run CI + review + smoke checks.
+5. Request explicit human `push` command (mandatory gate).
+6. Push/open PR only after explicit command.
+7. Merge if Definition of Done is met.
+8. Update task state to `done`.
 
 ## Task States
 - `ready`

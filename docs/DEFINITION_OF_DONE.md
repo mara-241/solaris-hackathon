@@ -7,6 +7,9 @@ A PR is **not done** until all required checks pass.
 - [ ] CI green
 - [ ] No breaking schema changes (or schema updated intentionally)
 - [ ] Golden-path flow still works
+- [ ] Codex review completed
+- [ ] Gemini review completed (or explicitly waived)
+- [ ] Human explicitly authorized push/PR step
 
 ## Required tests/checks
 - [ ] Lint/type checks (when applicable)

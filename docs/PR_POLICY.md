@@ -7,8 +7,10 @@
 
 ## Merge gates
 - Passing CI is mandatory.
-- 1 reviewer approval required.
+- 1 human reviewer approval required.
+- AI reviewer checks: Codex + Gemini (Claude optional).
 - UI PRs must include screenshot evidence.
+- Push/PR creation requires explicit human command.
 
 ## Review checklist
 1. Does it satisfy acceptance criteria?

@@ -13,7 +13,10 @@
       "checks": {
         "ci": "pending",
         "goldenPath": "pending",
-        "eoFallback": "pending"
+        "eoFallback": "pending",
+        "codexReview": "pending",
+        "geminiReview": "pending",
+        "pushAuthorized": "pending"
       },
       "notes": ""
     }
