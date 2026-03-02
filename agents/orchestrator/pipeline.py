@@ -127,6 +127,7 @@ def run_pipeline(request: dict) -> dict:
         "demand_forecast": optimization["demand_forecast"],
         "scenario_set": optimization["scenario_set"],
         "optimization_result": optimization["optimization_result"],
+        "impact_metrics": optimization.get("impact_metrics", {}),
         "quality": {
             "status": opt_status,
             "confidence": optimization.get("confidence", 0.5),

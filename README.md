@@ -32,7 +32,9 @@ Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts
 - `scripts/review_ready_ping.py` — Telegram ping when task is fully review-ready
 - `scripts/update_task_checks.py` — auto-update ci/goldenPath/eoFallback checks from validation runs
 - `scripts/demo_scenarios.py` — run rainy-season + high-growth demo scenarios
+- `scripts/fl_round_demo.py` — federated learning demo stub (FedAvg simulation)
 - `scripts/smoke_test.py` and `scripts/smoke_api.py` — validation checks
+- `docs/MODEL_CARD_DEMAND_NN_V1.json` — NN v1 model card + fallback contract
 
 ## Operating Docs
 - `docs/OPERATIONS.md`
