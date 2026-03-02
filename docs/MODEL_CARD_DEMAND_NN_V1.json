@@ -1,8 +1,8 @@
 {
-  "model_name": "demand_nn_v1",
+  "model_name": "demand_nn_v1_tiny_mlp",
   "model_input_version": "v1",
-  "framework": "pytorch (planned)",
-  "status": "stub",
+  "framework": "custom json-weights inference (torch-upgrade path)",
+  "status": "inference_enabled",
   "target": "kwh_per_day",
   "features": [
     "rain_risk",
@@ -13,7 +13,9 @@
     "ndvi_mean",
     "settlement_density_encoded"
   ],
-  "fallback_behavior": "heuristic_model_when_nn_unavailable",
+  "normalization": "z-score with model-bundled mean/std",
+  "weights_artifact": "docs/models/demand_nn_v1.weights.json",
+  "fallback_behavior": "heuristic_model_when_nn_disabled_or_model_unavailable",
   "limitations": [
     "Not trained on real NGO production data yet",
     "Derived impact metrics are estimate-level outputs"

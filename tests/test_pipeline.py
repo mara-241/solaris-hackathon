@@ -10,6 +10,7 @@ def test_pipeline_returns_expected_sections():
     assert "demand_forecast" in out["outputs"]
     assert "scenario_set" in out["outputs"]
     assert "optimization_result" in out["outputs"]
+    assert "model_metadata" in out["outputs"]
     assert "impact_metrics" in out["outputs"]
     assert out["outputs"]["impact_metrics"]["confidence_band"] in {"low", "medium", "high"}
     assert out["outputs"]["quality"]["confidence"] >= 0
