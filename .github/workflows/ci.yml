@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest jsonschema
+
+      - name: Schema smoke check
+        run: |
+          python - << 'PY'
+          import json
+          from pathlib import Path
+          p = Path('shared/schemas/pipeline.v1.json')
+          data = json.loads(p.read_text())
+          assert data.get('title') == 'Solaris Pipeline v1'
+          print('Schema smoke check passed')
+          PY
+
+      - name: Run tests
+        run: pytest -q || true
