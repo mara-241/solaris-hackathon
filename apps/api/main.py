@@ -1,10 +1,21 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from agents.orchestrator.pipeline import run_pipeline
-from apps.api.store import get_run, init_db, save_run
+from apps.api.store import RunStore, get_store
 
-app = FastAPI(title="Solaris API", version="0.3.0")
+store: RunStore = get_store()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    store.init()
+    yield
+
+
+app = FastAPI(title="Solaris API", version="0.4.0", lifespan=lifespan)
 
 
 class RunRequest(BaseModel):
@@ -16,26 +27,21 @@ class RunRequest(BaseModel):
     usage_profile: str | None = None
 
 
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
-
-
 @app.get("/health")
 def health():
-    return {"ok": True, "storage": "sqlite"}
+    return {"ok": True, "storage": type(store).__name__}
 
 
 @app.post("/run")
 def run(req: RunRequest):
     result = run_pipeline(req.model_dump())
-    save_run(result)
+    store.save_run(result)
     return result
 
 
 @app.get("/run/{run_id}")
 def run_by_id(run_id: str):
-    item = get_run(run_id)
+    item = store.get_run(run_id)
     if not item:
         raise HTTPException(status_code=404, detail="run not found")
     return item

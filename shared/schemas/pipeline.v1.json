@@ -40,8 +40,30 @@
             "upper_ci": { "type": "number" }
           }
         },
-        "scenario_set": { "type": "object" },
-        "optimization_result": { "type": "object" },
+        "scenario_set": {
+          "type": "object",
+          "required": ["primary"],
+          "properties": {
+            "primary": {
+              "type": "object",
+              "required": ["pv_kw", "battery_kwh", "solar_kits"],
+              "properties": {
+                "pv_kw": { "type": "number" },
+                "battery_kwh": { "type": "number" },
+                "solar_kits": { "type": "integer", "minimum": 0 }
+              }
+            }
+          }
+        },
+        "optimization_result": {
+          "type": "object",
+          "required": ["top_plan_id", "priority_score", "estimated_efficiency_gain_pct"],
+          "properties": {
+            "top_plan_id": { "type": "string" },
+            "priority_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "estimated_efficiency_gain_pct": { "type": "number" }
+          }
+        },
         "quality": {
           "type": "object",
           "required": ["status", "confidence", "fallback_used"],
