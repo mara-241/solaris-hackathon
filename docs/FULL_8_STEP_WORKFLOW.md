@@ -24,6 +24,7 @@
 
 ## 6) Automated Validation
 - CI green + smoke tests + degraded-path checks.
+- Run `scripts/update_task_checks.py --id <task_id>` to auto-write ci/goldenPath/eoFallback status.
 - Fail closed on missing required checks.
 
 ## 7) Human Review + Telegram Ping
