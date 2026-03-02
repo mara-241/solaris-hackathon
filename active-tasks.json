@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "updatedAt": "",
+  "tasks": [
+    {
+      "id": "feat-data-weather-ingestion",
+      "title": "Data agent MVP ingestion",
+      "owner": "agent:data",
+      "session": "",
+      "branch": "feat/data-weather-ingestion",
+      "status": "ready",
+      "pr": "",
+      "checks": {
+        "ci": "pending",
+        "goldenPath": "pending",
+        "eoFallback": "pending"
+      },
+      "notes": ""
+    }
+  ]
+}
