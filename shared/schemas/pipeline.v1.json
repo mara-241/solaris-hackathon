@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Solaris Pipeline v1",
+  "type": "object",
+  "required": ["request", "outputs"],
+  "properties": {
+    "request": {
+      "type": "object",
+      "required": ["request_id", "lat", "lon", "horizon_days"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "lat": { "type": "number" },
+        "lon": { "type": "number" },
+        "horizon_days": { "type": "integer", "minimum": 1 },
+        "households": { "type": "integer", "minimum": 1 },
+        "usage_profile": { "type": "string" }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "properties": {
+        "demand_forecast": {
+          "type": "object",
+          "properties": {
+            "kwh_per_day": { "type": "number" },
+            "lower_ci": { "type": "number" },
+            "upper_ci": { "type": "number" }
+          }
+        },
+        "recommendation": {
+          "type": "object",
+          "properties": {
+            "pv_kw": { "type": "number" },
+            "battery_kwh": { "type": "number" },
+            "solar_kits": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "quality": {
+          "type": "object",
+          "properties": {
+            "eo_quality": { "type": "number", "minimum": 0, "maximum": 1 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "fallback_used": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}
