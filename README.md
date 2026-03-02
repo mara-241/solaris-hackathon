@@ -24,3 +24,9 @@ Given a village (`lat/lon`, households, usage profile), produce:
 
 ## First Task
 Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts.
+
+## Operating Docs
+- `docs/OPERATIONS.md`
+- `docs/DEFINITION_OF_DONE.md`
+- `docs/PR_POLICY.md`
+- `active-tasks.json`
