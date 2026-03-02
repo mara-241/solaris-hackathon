@@ -30,4 +30,5 @@ Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts
 - `docs/DEFINITION_OF_DONE.md`
 - `docs/PR_POLICY.md`
 - `docs/SECRETS_AND_ENV.md`
+- `docs/PR_REVIEW_CHECKLIST.md`
 - `active-tasks.json`
