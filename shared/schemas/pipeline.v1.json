@@ -24,6 +24,7 @@
         "demand_forecast",
         "scenario_set",
         "optimization_result",
+        "impact_metrics",
         "quality"
       ],
       "properties": {
@@ -62,6 +63,31 @@
             "top_plan_id": { "type": "string" },
             "priority_score": { "type": "number", "minimum": 0, "maximum": 1 },
             "estimated_efficiency_gain_pct": { "type": "number" }
+          }
+        },
+        "impact_metrics": {
+          "type": "object",
+          "required": [
+            "estimated_efficiency_gain_pct",
+            "under_provisioning_risk_reduction_pct",
+            "over_provisioning_waste_reduction_pct",
+            "households_served_estimate",
+            "co2_avoided_tons_estimate",
+            "annual_cost_savings_usd_estimate",
+            "confidence_score",
+            "confidence_band",
+            "assumptions"
+          ],
+          "properties": {
+            "estimated_efficiency_gain_pct": { "type": "number" },
+            "under_provisioning_risk_reduction_pct": { "type": "number" },
+            "over_provisioning_waste_reduction_pct": { "type": "number" },
+            "households_served_estimate": { "type": "integer", "minimum": 1 },
+            "co2_avoided_tons_estimate": { "type": "number" },
+            "annual_cost_savings_usd_estimate": { "type": "number" },
+            "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "confidence_band": { "type": "string", "enum": ["low", "medium", "high"] },
+            "assumptions": { "type": "array", "items": { "type": "string" } }
           }
         },
         "quality": {

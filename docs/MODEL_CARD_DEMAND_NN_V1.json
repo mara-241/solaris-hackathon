@@ -1,0 +1,21 @@
+{
+  "model_name": "demand_nn_v1",
+  "model_input_version": "v1",
+  "framework": "pytorch (planned)",
+  "status": "stub",
+  "target": "kwh_per_day",
+  "features": [
+    "rain_risk",
+    "sun_hours",
+    "households",
+    "usage_profile_encoded",
+    "roof_count_estimate",
+    "ndvi_mean",
+    "settlement_density_encoded"
+  ],
+  "fallback_behavior": "heuristic_model_when_nn_unavailable",
+  "limitations": [
+    "Not trained on real NGO production data yet",
+    "Derived impact metrics are estimate-level outputs"
+  ]
+}
