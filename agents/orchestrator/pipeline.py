@@ -1,27 +1,26 @@
-from agents.data.agent import collect_data
-from agents.eo.agent import extract_eo_features
-from agents.forecast.agent import predict_demand
-from agents.sizing.agent import recommend_system
-from agents.report.agent import make_report
+from agents.perception.agent import read_and_analyze_data
+from agents.spatial_vlm.agent import analyze_spatial_context
+from agents.energy_optimization.agent import optimize_energy_plan
+from agents.evidence.agent import build_evidence_pack
 
 
 def run_pipeline(request: dict) -> dict:
-    data = collect_data(request)
-    eo = extract_eo_features(request)
-    forecast = predict_demand(request, data, eo)
-    rec = recommend_system(forecast)
-    report = make_report(request, data, eo, forecast, rec)
+    perception = read_and_analyze_data(request)
+    spatial = analyze_spatial_context(request)
+    optimization = optimize_energy_plan(perception, spatial)
+    evidence = build_evidence_pack(request, perception, spatial, optimization)
 
     return {
         "request": request,
         "outputs": {
-            "demand_forecast": forecast,
-            "recommendation": rec,
+            "demand_forecast": optimization["demand_model"],
+            "recommendation": optimization["sizing_simulator"],
             "quality": {
-                "eo_quality": eo.get("eo_quality", 0.0),
-                "confidence": forecast.get("confidence", 0.5),
-                "fallback_used": eo.get("fallback_used", True),
+                "eo_quality": spatial.get("confidence", 0.0),
+                "confidence": optimization.get("confidence", 0.5),
+                "fallback_used": spatial.get("fallback_used", True),
             },
+            "portfolio": optimization["portfolio_optimizer"],
         },
-        "report": report,
+        "evidence_pack": evidence,
     }
