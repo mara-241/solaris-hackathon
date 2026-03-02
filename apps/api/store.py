@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parents[2] / "db" / "solaris.db"
+SCHEMA_SQL_PATH = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
 
 
 class RunStore(ABC):
@@ -130,18 +131,148 @@ class SQLiteRunStore(RunStore):
 
 
 class PostgresRunStore(RunStore):
+    def __init__(self, dsn: str):
+        self.dsn = dsn
+        try:
+            import psycopg  # type: ignore
+
+            self.psycopg = psycopg
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError(
+                "Postgres backend selected but psycopg is unavailable. Install requirements and retry."
+            ) from exc
+
+    def _connect(self):
+        return self.psycopg.connect(self.dsn)
+
     def init(self) -> None:
-        raise NotImplementedError("PostgresRunStore not wired yet. Use SQLiteRunStore for now.")
+        # Best effort: apply full schema if available, plus safety creation of required runtime tables.
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                if SCHEMA_SQL_PATH.exists():
+                    cur.execute(SCHEMA_SQL_PATH.read_text())
+
+                cur.execute(
+                    """
+                    create table if not exists agent_steps (
+                      id bigserial primary key,
+                      run_id text not null,
+                      agent_name text not null,
+                      step_order integer not null,
+                      status text not null,
+                      confidence double precision,
+                      assumptions jsonb,
+                      quality_flags jsonb,
+                      io_payload jsonb,
+                      started_at timestamptz not null default now(),
+                      finished_at timestamptz
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    create table if not exists evidence_packs (
+                      id bigserial primary key,
+                      run_id text not null,
+                      summary text,
+                      provenance jsonb,
+                      assumptions jsonb,
+                      quality_flags jsonb,
+                      confidence double precision,
+                      payload jsonb not null,
+                      created_at timestamptz not null default now()
+                    )
+                    """
+                )
+            conn.commit()
 
     def save_run(self, result: dict) -> None:
-        raise NotImplementedError("PostgresRunStore not wired yet. Use SQLiteRunStore for now.")
+        quality = result["outputs"]["quality"]
+        runtime = result.get("runtime", {})
+        evidence = result.get("evidence_pack", {})
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    insert into runs(run_id, status, started_at, finished_at, request_payload, output_payload, confidence_score)
+                    values(%s, %s, now(), now(), %s::jsonb, %s::jsonb, %s)
+                    on conflict (run_id) do update set
+                      status=excluded.status,
+                      finished_at=excluded.finished_at,
+                      request_payload=excluded.request_payload,
+                      output_payload=excluded.output_payload,
+                      confidence_score=excluded.confidence_score
+                    """,
+                    (
+                        result["run_id"],
+                        quality["status"],
+                        json.dumps(result.get("request", {})),
+                        json.dumps(result),
+                        quality["confidence"],
+                    ),
+                )
+
+                cur.execute("delete from agent_steps where run_id = %s", (result["run_id"],))
+                for idx, step in enumerate(runtime.get("agent_steps", []), start=1):
+                    cur.execute(
+                        """
+                        insert into agent_steps(
+                          run_id, agent_name, step_order, status, confidence, assumptions, quality_flags, io_payload, finished_at
+                        )
+                        values(%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, now())
+                        """,
+                        (
+                            result["run_id"],
+                            step.get("step", "unknown"),
+                            idx,
+                            step.get("status", "ok"),
+                            step.get("confidence"),
+                            json.dumps([]),
+                            json.dumps([]),
+                            json.dumps(step),
+                        ),
+                    )
+
+                cur.execute("delete from evidence_packs where run_id = %s", (result["run_id"],))
+                cur.execute(
+                    """
+                    insert into evidence_packs(
+                      run_id, summary, provenance, assumptions, quality_flags, confidence, payload
+                    )
+                    values(%s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s::jsonb)
+                    """,
+                    (
+                        result["run_id"],
+                        evidence.get("summary"),
+                        json.dumps(evidence.get("provenance", {})),
+                        json.dumps(evidence.get("assumptions", [])),
+                        json.dumps(evidence.get("quality_flags", [])),
+                        evidence.get("confidence"),
+                        json.dumps(evidence),
+                    ),
+                )
+            conn.commit()
 
     def get_run(self, run_id: str) -> dict | None:
-        raise NotImplementedError("PostgresRunStore not wired yet. Use SQLiteRunStore for now.")
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select output_payload from runs where run_id = %s", (run_id,))
+                row = cur.fetchone()
+        if not row:
+            return None
+
+        payload = row[0]
+        if isinstance(payload, str):
+            return json.loads(payload)
+        return payload
 
 
 def get_store() -> RunStore:
     backend = os.getenv("SOLARIS_STORE", "sqlite").lower().strip()
     if backend == "postgres":
-        return PostgresRunStore()
+        dsn = os.getenv("DATABASE_URL")
+        if not dsn:
+            raise RuntimeError("SOLARIS_STORE=postgres requires DATABASE_URL")
+        return PostgresRunStore(dsn)
     return SQLiteRunStore()
