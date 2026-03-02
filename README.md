@@ -25,6 +25,13 @@ Given a village (`lat/lon`, households, usage profile), produce:
 ## First Task
 Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts.
 
+## Workflow automation scripts
+- `scripts/new_task.py` — create task from incoming request
+- `scripts/check-agents.sh` — monitor task/check status and review readiness
+- `scripts/authorize_push.py` — record explicit human push authorization
+- `scripts/review_ready_ping.py` — Telegram ping when task is fully review-ready
+- `scripts/smoke_test.py` and `scripts/smoke_api.py` — validation checks
+
 ## Operating Docs
 - `docs/OPERATIONS.md`
 - `docs/DEFINITION_OF_DONE.md`
