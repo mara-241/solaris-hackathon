@@ -65,6 +65,15 @@
             "estimated_efficiency_gain_pct": { "type": "number" }
           }
         },
+        "model_metadata": {
+          "type": "object",
+          "properties": {
+            "model_input_version": { "type": "string" },
+            "nn_used": { "type": "boolean" },
+            "nn_model": { "type": ["string", "null"] },
+            "nn_fallback_reason": { "type": ["string", "null"] }
+          }
+        },
         "impact_metrics": {
           "type": "object",
           "required": [
