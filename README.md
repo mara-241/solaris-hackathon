@@ -30,9 +30,12 @@ Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts
 - `scripts/check-agents.sh` — monitor task/check status and review readiness
 - `scripts/authorize_push.py` — record explicit human push authorization
 - `scripts/review_ready_ping.py` — Telegram ping when task is fully review-ready
-- `scripts/update_task_checks.py` — auto-update ci/goldenPath/eoFallback checks from validation runs
+- `scripts/update_task_checks.py` — auto-update checks from validation runs (+ codex/gemini status)
+- `scripts/set_review_checks.py` — set Codex/Gemini reviewer outcomes explicitly
 - `scripts/demo_scenarios.py` — run rainy-season + high-growth demo scenarios
 - `scripts/fl_round_demo.py` — federated learning demo stub (FedAvg simulation)
+- `scripts/postgres_e2e.py` — Postgres end-to-end persistence check
+- `scripts/run_demo_bundle.py` — one-command judge/demo bundle
 - `scripts/smoke_test.py` and `scripts/smoke_api.py` — validation checks
 - `docs/MODEL_CARD_DEMAND_NN_V1.json` — NN v1 model card + fallback contract
 
