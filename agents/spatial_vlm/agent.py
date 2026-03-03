@@ -7,8 +7,12 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 from shared.http_cache import CacheFetchError, fetch_bytes_cached, fetch_json_cached
+from shared.validation import parse_households, parse_lat_lon
 
 TILE_SAMPLE_BYTES = 5000  # heuristic byte window for quick MVP texture proxy
+OSM_TILE_BASE_URL = "https://tile.openstreetmap.org"
+OVERPASS_INTERPRETER_URL = "https://overpass-api.de/api/interpreter"
+PLANETARY_STAC_SEARCH_URL = "https://planetarycomputer.microsoft.com/api/stac/v1/search"
 
 
 def _tile_xy(lat: float, lon: float, zoom: int = 14) -> tuple[int, int]:
@@ -21,7 +25,7 @@ def _tile_xy(lat: float, lon: float, zoom: int = 14) -> tuple[int, int]:
 
 def _fetch_tile_bytes(lat: float, lon: float) -> tuple[bytes, bool, bool]:
     x, y = _tile_xy(lat, lon)
-    url = f"https://tile.openstreetmap.org/14/{x}/{y}.png"
+    url = f"{OSM_TILE_BASE_URL}/14/{x}/{y}.png"
     return fetch_bytes_cached(url, timeout=10, ttl_seconds=86400, stale_ok=True)
 
 
@@ -38,7 +42,7 @@ out count;
 """
         enc = urllib.parse.quote(query)
         payload, from_cache, stale_used = fetch_json_cached(
-            f"https://overpass-api.de/api/interpreter?data={enc}",
+            f"{OVERPASS_INTERPRETER_URL}?data={enc}",
             method="GET",
             ttl_seconds=86400,
             stale_ok=True,
@@ -51,7 +55,7 @@ out count;
             try:
                 count = int(tags.get("total"))
             except (TypeError, ValueError):
-                count = len(elems)
+                count = None
         if from_cache:
             flags.append("overpass_cache_hit")
         if stale_used:
@@ -74,7 +78,7 @@ def _fetch_planetary_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
             "limit": 25,
         }
         payload, from_cache, stale_used = fetch_json_cached(
-            "https://planetarycomputer.microsoft.com/api/stac/v1/search",
+            PLANETARY_STAC_SEARCH_URL,
             method="POST",
             body=body,
             ttl_seconds=43200,
@@ -106,6 +110,8 @@ def _fetch_planetary_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
 def analyze_spatial_context(request: dict) -> dict:
     lat, lon, coords_ok = parse_lat_lon(request)
 
+    households, _ = parse_households(request.get("households"), default=100)
+
     if not coords_ok:
         return {
             "status": "degraded",
@@ -115,7 +121,7 @@ def analyze_spatial_context(request: dict) -> dict:
             "imagery": {"provider": "fallback", "compressed": False},
             "feature_summaries": {
                 "ndvi_mean": 0.35,
-                "roof_count_estimate": request.get("households") or 100,
+                "roof_count_estimate": households,
                 "settlement_density": "unknown",
             },
             "visual_embeddings_ref": None,
@@ -174,7 +180,7 @@ def analyze_spatial_context(request: dict) -> dict:
             "imagery": {"provider": "fallback", "compressed": False},
             "feature_summaries": {
                 "ndvi_mean": 0.35,
-                "roof_count_estimate": request.get("households") or 100,
+                "roof_count_estimate": households,
                 "settlement_density": "unknown",
             },
             "visual_embeddings_ref": None,

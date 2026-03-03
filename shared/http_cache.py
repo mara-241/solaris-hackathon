@@ -30,6 +30,10 @@ class CacheFetchError(RuntimeError):
     pass
 
 
+def _ensure_cache_dir() -> None:
+    os.makedirs(CACHE_DIR, mode=0o700, exist_ok=True)
+
+
 def _cache_path(key: str) -> Path:
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
     return CACHE_DIR / f"{digest}.json"
@@ -38,14 +42,14 @@ def _cache_path(key: str) -> Path:
 def _validate_url(url: str) -> None:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != "https":
-        raise CacheFetchError(f"only https URLs allowed: {url}")
+        raise CacheFetchError("only https URLs allowed")
     host = (parsed.hostname or "").lower()
     if host not in ALLOWED_HOSTS:
         raise CacheFetchError(f"host not allowlisted: {host}")
 
 
 def _write_json_atomic(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_cache_dir()
     with tempfile.NamedTemporaryFile("w", delete=False, dir=path.parent) as tmp:
         json.dump(payload, tmp)
         tmp.flush()
@@ -71,7 +75,7 @@ def fetch_json_cached(
     body: dict | list | None = None,
 ) -> tuple[Any, bool, bool]:
     """Return (payload, from_cache, stale_used)."""
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_cache_dir()
     body_str = json.dumps(body, sort_keys=True) if body is not None else ""
     key = f"{method.upper()}::{url}::{body_str}"
     p = _cache_path(key)
@@ -101,7 +105,8 @@ def fetch_json_cached(
             cached["last_error"] = type(exc).__name__
             _write_json_atomic(p, cached)
             return cached["payload"], True, True
-        raise CacheFetchError(f"fetch_json_cached failed for {url}: {type(exc).__name__}") from exc
+        host = urllib.parse.urlparse(url).hostname or "unknown"
+        raise CacheFetchError(f"fetch_json_cached failed for host={host}: {type(exc).__name__}") from exc
 
 
 def fetch_bytes_cached(
@@ -111,7 +116,7 @@ def fetch_bytes_cached(
     ttl_seconds: int = 86400,
     stale_ok: bool = True,
 ) -> tuple[bytes, bool, bool]:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_cache_dir()
     p = _cache_path(url)
     now = time.time()
 
@@ -134,4 +139,5 @@ def fetch_bytes_cached(
             cached["last_error"] = type(exc).__name__
             _write_json_atomic(p, cached)
             return bytes.fromhex(cached["payload_hex"]), True, True
-        raise CacheFetchError(f"fetch_bytes_cached failed for {url}: {type(exc).__name__}") from exc
+        host = urllib.parse.urlparse(url).hostname or "unknown"
+        raise CacheFetchError(f"fetch_bytes_cached failed for host={host}: {type(exc).__name__}") from exc

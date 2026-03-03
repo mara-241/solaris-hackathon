@@ -1,3 +1,6 @@
+OVERPASS_PROVIDER = "overpass-api.de"
+
+
 def build_evidence_pack(request: dict, feature_context: dict, optimization: dict) -> dict:
     demand = optimization["demand_forecast"]["kwh_per_day"]
     primary = optimization["scenario_set"]["primary"]
@@ -17,7 +20,7 @@ def build_evidence_pack(request: dict, feature_context: dict, optimization: dict
             *(feature_context.get("quality_flags") or []),
             *(optimization.get("quality_flags") or []),
         ],
-        "run_id": request.get("request_id"),
+        "run_id": request["request_id"],
         "summary": summary,
         "provenance": {
             "weather_source": feature_context.get("perception", {}).get("weather", {}).get("source"),
@@ -28,7 +31,7 @@ def build_evidence_pack(request: dict, feature_context: dict, optimization: dict
                 "gdacs": feature_context.get("perception", {}).get("event_signals", {}).get("gdacs", {}).get("source"),
             },
             "spatial_sources": {
-                "overpass": "overpass-api.de",
+                "overpass": OVERPASS_PROVIDER,
                 "planetary_computer": "planetary-computer" if feature_context.get("spatial", {}).get("feature_summaries", {}).get("sentinel_scene_count") is not None else None,
             },
         },
