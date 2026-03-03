@@ -16,7 +16,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Solaris API", version="0.4.1", lifespan=lifespan)
+app = FastAPI(title="Solaris API", version="0.4.2", lifespan=lifespan)
 API_AUTH_TOKEN = os.getenv("SOLARIS_API_TOKEN", "").strip()
 
 
@@ -58,7 +58,28 @@ def run_by_id(run_id: str, x_api_key: str | None = Header(default=None)):
     return item
 
 
+@app.get("/run/{run_id}/quality")
+def run_quality(run_id: str, x_api_key: str | None = Header(default=None)):
+    _require_auth(x_api_key)
+    item = store.get_run(run_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="run not found")
+
+    outputs = item.get("outputs", {})
+    feature_context = outputs.get("feature_context", {})
+    quality = outputs.get("quality", {})
+    return {
+        "run_id": run_id,
+        "status": quality.get("status"),
+        "confidence": quality.get("confidence"),
+        "fallback_used": quality.get("fallback_used"),
+        "quality_flags": feature_context.get("quality_flags", []),
+        "provenance": outputs.get("provenance", {}),
+        "runtime_errors": item.get("runtime", {}).get("errors", []),
+    }
+
+
 # Backward-compatible endpoint used by early tests/clients
 @app.post("/forecast")
-def forecast(req: RunRequest):
-    return run(req)
+def forecast(req: RunRequest, x_api_key: str | None = Header(default=None)):
+    return run(req, x_api_key=x_api_key)
