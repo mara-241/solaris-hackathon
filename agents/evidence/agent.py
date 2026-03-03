@@ -23,6 +23,14 @@ def build_evidence_pack(request: dict, feature_context: dict, optimization: dict
             "weather_source": feature_context.get("perception", {}).get("weather", {}).get("source"),
             "demographics_source": feature_context.get("perception", {}).get("demographics", {}).get("source"),
             "imagery_provider": feature_context.get("spatial", {}).get("imagery", {}).get("provider"),
+            "event_sources": {
+                "usgs": feature_context.get("perception", {}).get("event_signals", {}).get("usgs", {}).get("source"),
+                "gdacs": feature_context.get("perception", {}).get("event_signals", {}).get("gdacs", {}).get("source"),
+            },
+            "spatial_sources": {
+                "overpass": "overpass-api.de",
+                "planetary_computer": "planetary-computer" if feature_context.get("spatial", {}).get("feature_summaries", {}).get("sentinel_scene_count") is not None else None,
+            },
         },
         "artifacts": {
             "visual_embeddings_ref": feature_context.get("spatial", {}).get("visual_embeddings_ref"),
