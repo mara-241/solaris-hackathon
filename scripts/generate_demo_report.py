@@ -54,6 +54,8 @@ def scenario_rows() -> list[dict]:
                 "confidence": res["outputs"]["quality"]["confidence"],
                 "fallback_used": res["outputs"]["quality"]["fallback_used"],
                 "assumptions": "; ".join(imp.get("assumptions", [])[:2]),
+                "provenance": res["outputs"].get("provenance", {}),
+                "quality_flags": res["outputs"].get("feature_context", {}).get("quality_flags", []),
             }
         )
     return out
@@ -73,6 +75,16 @@ def build_markdown(rows: list[dict]) -> str:
         lines.append(
             f"| {r['scenario']} | {r['kwh_per_day']} | {r['pv_kw']} | {r['battery_kwh']} | {r['efficiency_gain_pct']} | {r['co2_avoided_tons']} | {r['confidence']} | {r['fallback_used']} |"
         )
+    lines += ["", "## Data Provenance & Quality"]
+    for r in rows:
+        prov = r.get("provenance", {})
+        lines += [
+            f"- **{r['scenario']}**",
+            f"  - weather: `{prov.get('weather_source')}`",
+            f"  - demographics: `{prov.get('demographics_source')}`",
+            f"  - imagery: `{prov.get('imagery_provider')}`",
+            f"  - quality flags: `{', '.join(r.get('quality_flags', [])) or 'none'}`",
+        ]
     lines += ["", "## Notes", "- Impact metrics are estimate-level outputs."]
     return "\n".join(lines) + "\n"
 
