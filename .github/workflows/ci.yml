@@ -4,6 +4,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      require_postgres_e2e:
+        description: "Require Postgres E2E check (fails if DATABASE_URL secret missing)"
+        required: false
+        default: "false"
 
 jobs:
   checks:
@@ -45,16 +51,28 @@ jobs:
       - name: Run tests (includes degraded-path)
         run: pytest -q
 
-      - name: Optional Postgres E2E
+      - name: Postgres E2E (strict when configured)
         env:
-          SOLARIS_STORE: ${{ secrets.DATABASE_URL != '' && 'postgres' || 'sqlite' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REQUIRE_POSTGRES_INPUT: ${{ github.event.inputs.require_postgres_e2e || 'false' }}
         run: |
-          if [ -f scripts/postgres_e2e.py ]; then
-            python3 scripts/postgres_e2e.py
-          else
+          if [ ! -f scripts/postgres_e2e.py ]; then
             echo "Skipping Postgres E2E (script not present on this branch)."
+            exit 0
           fi
+
+          if [ -n "$DATABASE_URL" ]; then
+            echo "Running Postgres E2E with DATABASE_URL secret."
+            SOLARIS_STORE=postgres DATABASE_URL="$DATABASE_URL" python3 scripts/postgres_e2e.py --require
+            exit $?
+          fi
+
+          if [ "$REQUIRE_POSTGRES_INPUT" = "true" ]; then
+            echo "DATABASE_URL secret is required but missing."
+            exit 1
+          fi
+
+          echo "Skipping Postgres E2E: DATABASE_URL secret not configured."
 
   ui-screenshot-check:
     if: github.event_name == 'pull_request'
