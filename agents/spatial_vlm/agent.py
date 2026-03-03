@@ -2,14 +2,8 @@ from __future__ import annotations
 
 import json
 import math
-import urllib.error
-import urllib.parse
-from datetime import datetime, timedelta, timezone
 
-from shared.http_cache import CacheFetchError, fetch_bytes_cached, fetch_json_cached
-from shared.validation import parse_lat_lon
-
-TILE_SAMPLE_BYTES = 5000  # heuristic byte window for quick MVP texture proxy
+from shared.http_cache import fetch_bytes_cached, fetch_json_cached
 
 
 def _tile_xy(lat: float, lon: float, zoom: int = 14) -> tuple[int, int]:
@@ -37,6 +31,7 @@ def _fetch_overpass_buildings(lat: float, lon: float) -> tuple[int | None, list[
 );
 out count;
 """
+        import urllib.parse
         enc = urllib.parse.quote(query)
         payload, from_cache, stale_used = fetch_json_cached(
             f"https://overpass-api.de/api/interpreter?data={enc}",
@@ -49,16 +44,13 @@ out count;
         count = None
         if elems:
             tags = elems[0].get("tags", {})
-            try:
-                count = int(tags.get("total"))
-            except (TypeError, ValueError):
-                count = None
+            count = int(tags.get("total", 0)) if str(tags.get("total", "")).isdigit() else len(elems)
         if from_cache:
             flags.append("overpass_cache_hit")
         if stale_used:
             flags.append("overpass_stale_cache")
         return count, flags
-    except (CacheFetchError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, TypeError):
+    except Exception:
         flags.append("overpass_unavailable")
         return None, flags
 
@@ -66,12 +58,10 @@ out count;
 def _fetch_planetary_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
     flags: list[str] = []
     try:
-        end = datetime.now(timezone.utc).date()
-        start = end - timedelta(days=180)
         body = {
             "collections": ["sentinel-2-l2a"],
             "bbox": [lon - 0.2, lat - 0.2, lon + 0.2, lat + 0.2],
-            "datetime": f"{start.isoformat()}/{end.isoformat()}",
+            "datetime": "2025-10-01/2026-03-03",
             "limit": 25,
         }
         payload, from_cache, stale_used = fetch_json_cached(
@@ -99,15 +89,35 @@ def _fetch_planetary_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
             "sentinel_scene_count": len(items),
             "avg_cloud_cover": avg_cloud,
         }, flags
-    except (CacheFetchError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, TypeError):
+    except Exception:
         flags.append("planetary_unavailable")
         return {"source": "fallback", "sentinel_scene_count": 0, "avg_cloud_cover": None}, flags
 
 
 def analyze_spatial_context(request: dict) -> dict:
-    lat, lon, coords_ok = parse_lat_lon(request)
+    try:
+        lat = float(request.get("lat", 0.0))
+        lon = float(request.get("lon", 0.0))
+    except (TypeError, ValueError):
+        lat, lon = 0.0, 0.0
 
-    if not coords_ok:
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return {
+            "status": "degraded",
+            "confidence": 0.35,
+            "assumptions": ["Spatial adapter received invalid coordinates; using fallback priors."],
+            "quality_flags": ["invalid_coordinates", "spatial_imagery_fallback"],
+            "imagery": {"provider": "fallback", "compressed": False},
+            "feature_summaries": {
+                "ndvi_mean": 0.35,
+                "roof_count_estimate": request.get("households") or 100,
+                "settlement_density": "unknown",
+            },
+            "visual_embeddings_ref": None,
+            "fallback_used": True,
+        }
+
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
         return {
             "status": "degraded",
             "confidence": 0.35,
@@ -125,8 +135,7 @@ def analyze_spatial_context(request: dict) -> dict:
 
     try:
         raw, from_cache, stale_used = _fetch_tile_bytes(lat, lon)
-        sample = raw[:TILE_SAMPLE_BYTES]
-        byte_mean = sum(sample) / max(1, len(sample))
+        byte_mean = sum(raw[:5000]) / max(1, len(raw[:5000]))
         roof_est = int((byte_mean / 255.0) * 180)
         ndvi_proxy = round(min(0.9, max(0.1, (255 - byte_mean) / 255)), 2)
         density = "high" if roof_est > 120 else ("medium" if roof_est > 70 else "low")
@@ -145,7 +154,7 @@ def analyze_spatial_context(request: dict) -> dict:
             roof_est = max(roof_est, overpass_count)
             density = "high" if roof_est > 120 else ("medium" if roof_est > 70 else "low")
 
-        degraded = any(f.endswith("unavailable") or f.endswith("stale_cache") for f in flags)
+        degraded = stale_used or any(f.endswith("unavailable") or f.endswith("stale_cache") for f in flags)
 
         return {
             "status": "degraded" if degraded else "ok",
