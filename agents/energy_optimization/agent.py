@@ -9,8 +9,8 @@ from agents.energy_optimization.impact import compute_impact_metrics
 USAGE_CLASSES = ["mixed", "productive-use-heavy", "residential"]
 DENSITY_CLASSES = ["low", "medium", "high", "unknown"]
 
-DEFAULT_MAX_MAE = "120.0"
-DEFAULT_MAX_RMSE = "140.0"
+DEFAULT_MAX_MAE = 120.0
+DEFAULT_MAX_RMSE = 140.0
 
 
 def _one_hot(value: str, classes: list[str]) -> list[float]:
@@ -45,10 +45,7 @@ def _relu(vec: list[float]) -> list[float]:
 
 
 def _dense(x: list[float], w: list[list[float]], b: list[float]) -> list[float]:
-    out: list[float] = []
-    for row, bias in zip(w, b):
-        out.append(sum(v * rw for v, rw in zip(x, row)) + bias)
-    return out
+    return [sum(v * rw for v, rw in zip(x, row)) + bias for row, bias in zip(w, b)]
 
 
 def _mlp_forward(x: list[float], model: dict) -> float:
@@ -66,8 +63,8 @@ def _nn_predict(feature_context: dict) -> tuple[float | None, dict]:
     enabled = os.getenv("DEMAND_NN_ENABLED", "false").lower() == "true"
     model_path = Path(os.getenv("DEMAND_NN_MODEL_PATH", "docs/models/demand_nn_v1.weights.json"))
     metrics_path = Path(os.getenv("DEMAND_NN_METRICS_PATH", "docs/models/demand_nn_v1.metrics.json"))
-    max_mae = float(os.getenv("DEMAND_NN_MAX_MAE", DEFAULT_MAX_MAE))
-    max_rmse = float(os.getenv("DEMAND_NN_MAX_RMSE", DEFAULT_MAX_RMSE))
+    max_mae = float(os.getenv("DEMAND_NN_MAX_MAE", str(DEFAULT_MAX_MAE)))
+    max_rmse = float(os.getenv("DEMAND_NN_MAX_RMSE", str(DEFAULT_MAX_RMSE)))
 
     if not enabled:
         return None, {"model_input_version": "v1", "nn_used": False, "nn_fallback_reason": "nn_disabled"}
