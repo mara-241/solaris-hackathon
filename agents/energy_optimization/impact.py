@@ -1,5 +1,22 @@
 from __future__ import annotations
 
+# Impact coefficient constants (hackathon assumptions)
+DIESEL_KG_CO2_PER_KWH = 0.7
+BASELINE_COST_USD_PER_KWH = 0.28
+OPTIMIZED_COST_USD_PER_KWH = 0.19
+
+EFFICIENCY_BASE = 12.0
+EFFICIENCY_PRIORITY_MULTIPLIER = 10.0
+EFFICIENCY_MAX = 25.0
+
+UNDER_PROVISION_BASE = 10.0
+UNDER_PROVISION_PRIORITY_MULTIPLIER = 18.0
+UNDER_PROVISION_MAX = 35.0
+
+OVER_WASTE_BASE = 8.0
+OVER_WASTE_PRIORITY_MULTIPLIER = 14.0
+OVER_WASTE_MAX = 30.0
+
 
 def compute_impact_metrics(
     *,
@@ -8,18 +25,15 @@ def compute_impact_metrics(
     priority_score: float,
     confidence_score: float,
 ) -> dict:
-    # Explicit assumptions for hackathon-grade derived metrics.
-    diesel_kg_co2_per_kwh = 0.7
-    baseline_cost_usd_per_kwh = 0.28
-    optimized_cost_usd_per_kwh = 0.19
-
     annual_kwh = demand_kwh * 365
-    annual_cost_savings = max(0.0, annual_kwh * (baseline_cost_usd_per_kwh - optimized_cost_usd_per_kwh))
-    co2_avoided_tons = (annual_kwh * diesel_kg_co2_per_kwh) / 1000.0
+    annual_cost_savings = max(0.0, annual_kwh * (BASELINE_COST_USD_PER_KWH - OPTIMIZED_COST_USD_PER_KWH))
+    co2_avoided_tons = (annual_kwh * DIESEL_KG_CO2_PER_KWH) / 1000.0
 
-    efficiency_gain = round(min(25.0, 12.0 + (priority_score * 10.0)), 2)
-    under_risk_reduction = round(min(35.0, 10.0 + (priority_score * 18.0)), 2)
-    over_waste_reduction = round(min(30.0, 8.0 + (priority_score * 14.0)), 2)
+    efficiency_gain = round(min(EFFICIENCY_MAX, EFFICIENCY_BASE + (priority_score * EFFICIENCY_PRIORITY_MULTIPLIER)), 2)
+    under_risk_reduction = round(
+        min(UNDER_PROVISION_MAX, UNDER_PROVISION_BASE + (priority_score * UNDER_PROVISION_PRIORITY_MULTIPLIER)), 2
+    )
+    over_waste_reduction = round(min(OVER_WASTE_MAX, OVER_WASTE_BASE + (priority_score * OVER_WASTE_PRIORITY_MULTIPLIER)), 2)
 
     return {
         "estimated_efficiency_gain_pct": efficiency_gain,
@@ -31,8 +45,8 @@ def compute_impact_metrics(
         "confidence_score": round(confidence_score, 2),
         "confidence_band": "high" if confidence_score >= 0.8 else ("medium" if confidence_score >= 0.6 else "low"),
         "assumptions": [
-            "Diesel displacement baseline at 0.7 kgCO2 per kWh.",
-            "Cost delta baseline 0.28 to 0.19 USD per kWh.",
+            f"Diesel displacement baseline at {DIESEL_KG_CO2_PER_KWH} kgCO2 per kWh.",
+            f"Cost delta baseline {BASELINE_COST_USD_PER_KWH} to {OPTIMIZED_COST_USD_PER_KWH} USD per kWh.",
             "Impact metrics are derived estimates, not direct model outputs.",
         ],
     }

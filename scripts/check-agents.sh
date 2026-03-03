@@ -11,13 +11,16 @@ fi
 echo "=== Solaris task status snapshot ==="
 python3 - << 'PY'
 import json
+import sys
 from pathlib import Path
 
-required = ["ci", "goldenPath", "eoFallback", "codexReview", "geminiReview", "pushAuthorized"]
+sys.path.insert(0, str(Path('scripts').resolve()))
+from workflow_constants import REQUIRED_CHECKS
+
 data = json.loads(Path('active-tasks.json').read_text())
 for t in data.get('tasks', []):
     checks = t.get('checks', {})
-    missing = [k for k in required if checks.get(k) != 'pass']
+    missing = [k for k in REQUIRED_CHECKS if checks.get(k) != 'pass']
     ready = 'yes' if not missing else 'no'
     print(f"- {t.get('id')}: {t.get('status')} | branch={t.get('branch')} | pr={t.get('pr') or '-'} | review_ready={ready}")
     if missing:
