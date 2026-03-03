@@ -228,8 +228,8 @@ class PostgresRunStore(RunStore):
                             idx,
                             step.get("status", "ok"),
                             step.get("confidence"),
-                            json.dumps([]),
-                            json.dumps([]),
+                            json.dumps(step.get("assumptions", [])),
+                            json.dumps(step.get("quality_flags", [])),
                             json.dumps(step),
                         ),
                     )

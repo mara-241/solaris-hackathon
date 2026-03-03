@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from time import perf_counter
+import traceback
 
 from agents.energy_optimization.agent import optimize_energy_plan
 from agents.evidence.agent import build_evidence_pack
@@ -39,7 +40,8 @@ def _safe_future_result(future, default_payload: dict, error_flag: str) -> tuple
             "quality_flags": [error_flag],
             **default_payload,
         }
-        return degraded, f"{error_flag}: {exc}"
+        trace = traceback.format_exc(limit=5)
+        return degraded, f"{error_flag}: {exc}\n{trace}"
 
 
 def run_pipeline(request: dict) -> dict:

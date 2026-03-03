@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
+import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from agents.orchestrator.pipeline import run_pipeline
@@ -15,7 +16,8 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Solaris API", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Solaris API", version="0.4.1", lifespan=lifespan)
+API_AUTH_TOKEN = os.getenv("SOLARIS_API_TOKEN", "").strip()
 
 
 class RunRequest(BaseModel):
@@ -27,20 +29,29 @@ class RunRequest(BaseModel):
     usage_profile: str | None = None
 
 
+def _require_auth(x_api_key: str | None) -> None:
+    if not API_AUTH_TOKEN:
+        return
+    if not x_api_key or x_api_key != API_AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
 @app.get("/health")
 def health():
     return {"ok": True, "storage": type(store).__name__}
 
 
 @app.post("/run")
-def run(req: RunRequest):
+def run(req: RunRequest, x_api_key: str | None = Header(default=None)):
+    _require_auth(x_api_key)
     result = run_pipeline(req.model_dump())
     store.save_run(result)
     return result
 
 
 @app.get("/run/{run_id}")
-def run_by_id(run_id: str):
+def run_by_id(run_id: str, x_api_key: str | None = Header(default=None)):
+    _require_auth(x_api_key)
     item = store.get_run(run_id)
     if not item:
         raise HTTPException(status_code=404, detail="run not found")
