@@ -27,4 +27,4 @@ Use this checklist before merging feature branches into `main`.
 
 ## Smoke checks
 - [ ] `python3 scripts/smoke_test.py`
-- [ ] `python3 scripts/smoke_api.py --base-url http://127.0.0.1:8000`
+- [ ] `python3 scripts/smoke_api.py --base-url <api_base_url>`
