@@ -14,7 +14,7 @@ Given a village (`lat/lon`, households, usage profile), produce:
 ## Repository Structure
 - `agents/` — orchestrator + perception + spatial_vlm + energy_optimization + evidence
 - `shared/schemas/` — pipeline contracts (source of truth)
-- `apps/api/` — API backend (`/run`, `/run/{id}`, `/health`)
+- `apps/api/` — API backend (`/run`, `/run/{id}`, `/run/{id}/quality`, `/health`)
 - `db/` — SQL schema scaffold for Postgres
 - `tests/` — unit + smoke tests
 - `docs/` — architecture, operations, implementation plan
@@ -37,11 +37,11 @@ Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts
 - `scripts/collect_review_evidence.py` — ingest reviewer evidence JSON into task checks
 - `scripts/validate_vlm_contract.py` — validate required VLM output contract keys/confidence
 - `scripts/demo_scenarios.py` — run rainy-season + high-growth demo scenarios
-- `scripts/fl_round_demo.py` — federated learning demo stub (FedAvg simulation)
+- `scripts/generate_demo_report.py` — generate markdown scenario/impact report for judges
 - `scripts/postgres_e2e.py` — Postgres end-to-end persistence check
 - `scripts/run_demo_bundle.py` — one-command judge/demo bundle
+- `scripts/judge_run.py` — final pass/fail + artifact pointer output for judges
 - `scripts/smoke_test.py` and `scripts/smoke_api.py` — validation checks
-- `docs/MODEL_CARD_DEMAND_NN_V1.json` — NN v1 model card + fallback contract
 
 ## Operating Docs
 - `docs/OPERATIONS.md`
