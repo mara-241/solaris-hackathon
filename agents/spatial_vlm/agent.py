@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 
-from shared.http_cache import fetch_bytes_cached
+from shared.http_cache import fetch_bytes_cached, fetch_json_cached
 
 
 def _tile_xy(lat: float, lon: float, zoom: int = 14) -> tuple[int, int]:
@@ -18,6 +18,80 @@ def _fetch_tile_bytes(lat: float, lon: float) -> tuple[bytes, bool, bool]:
     x, y = _tile_xy(lat, lon)
     url = f"https://tile.openstreetmap.org/14/{x}/{y}.png"
     return fetch_bytes_cached(url, timeout=10, ttl_seconds=86400, stale_ok=True)
+
+
+def _fetch_overpass_buildings(lat: float, lon: float) -> tuple[int | None, list[str]]:
+    flags: list[str] = []
+    try:
+        query = f"""
+[out:json][timeout:20];
+(
+  way["building"](around:1500,{lat},{lon});
+  relation["building"](around:1500,{lat},{lon});
+);
+out count;
+"""
+        import urllib.parse
+        enc = urllib.parse.quote(query)
+        payload, from_cache, stale_used = fetch_json_cached(
+            f"https://overpass-api.de/api/interpreter?data={enc}",
+            method="GET",
+            ttl_seconds=86400,
+            stale_ok=True,
+            timeout=20,
+        )
+        elems = payload.get("elements", [])
+        count = None
+        if elems:
+            tags = elems[0].get("tags", {})
+            count = int(tags.get("total", 0)) if str(tags.get("total", "")).isdigit() else len(elems)
+        if from_cache:
+            flags.append("overpass_cache_hit")
+        if stale_used:
+            flags.append("overpass_stale_cache")
+        return count, flags
+    except Exception:
+        flags.append("overpass_unavailable")
+        return None, flags
+
+
+def _fetch_planetary_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
+    flags: list[str] = []
+    try:
+        body = {
+            "collections": ["sentinel-2-l2a"],
+            "bbox": [lon - 0.2, lat - 0.2, lon + 0.2, lat + 0.2],
+            "datetime": "2025-10-01/2026-03-03",
+            "limit": 25,
+        }
+        payload, from_cache, stale_used = fetch_json_cached(
+            "https://planetarycomputer.microsoft.com/api/stac/v1/search",
+            method="POST",
+            body=body,
+            ttl_seconds=43200,
+            stale_ok=True,
+            timeout=20,
+        )
+        items = payload.get("features", [])
+        cloud_vals = []
+        for it in items:
+            props = it.get("properties", {})
+            cc = props.get("eo:cloud_cover")
+            if isinstance(cc, (int, float)):
+                cloud_vals.append(float(cc))
+        avg_cloud = round(sum(cloud_vals) / len(cloud_vals), 2) if cloud_vals else None
+        if from_cache:
+            flags.append("planetary_cache_hit")
+        if stale_used:
+            flags.append("planetary_stale_cache")
+        return {
+            "source": "planetary-computer",
+            "sentinel_scene_count": len(items),
+            "avg_cloud_cover": avg_cloud,
+        }, flags
+    except Exception:
+        flags.append("planetary_unavailable")
+        return {"source": "fallback", "sentinel_scene_count": 0, "avg_cloud_cover": None}, flags
 
 
 def analyze_spatial_context(request: dict) -> dict:
@@ -68,15 +142,24 @@ def analyze_spatial_context(request: dict) -> dict:
         if stale_used:
             flags.append("spatial_stale_cache")
 
-        degraded = stale_used
+        overpass_count, oflags = _fetch_overpass_buildings(lat, lon)
+        pc_sig, pflags = _fetch_planetary_signal(lat, lon)
+        flags.extend(oflags + pflags)
+
+        if overpass_count is not None:
+            roof_est = max(roof_est, overpass_count)
+            density = "high" if roof_est > 120 else ("medium" if roof_est > 70 else "low")
+
+        degraded = stale_used or any(f.endswith("unavailable") or f.endswith("stale_cache") for f in flags)
+
         return {
             "status": "degraded" if degraded else "ok",
-            "confidence": 0.62 if degraded else 0.76,
+            "confidence": 0.62 if degraded else 0.78,
             "assumptions": [
                 "OSM tile statistics and open geospatial catalogs are used as MVP spatial proxies."
             ],
             "quality_flags": flags,
-            "imagery": {"provider": "openstreetmap", "compressed": False},
+            "imagery": {"provider": "openstreetmap+planetary", "compressed": False},
             "feature_summaries": {
                 "ndvi_mean": ndvi_proxy,
                 "roof_count_estimate": roof_est,

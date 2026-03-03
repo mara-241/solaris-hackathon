@@ -1,6 +1,18 @@
 from __future__ import annotations
 
-from shared.http_cache import fetch_json_cached
+import math
+import xml.etree.ElementTree as ET
+
+from shared.http_cache import fetch_bytes_cached, fetch_json_cached
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
+    return r * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
 
 def _get_json(url: str, timeout: int = 10, ttl_seconds: int = 3600):
@@ -72,10 +84,9 @@ def _fetch_demographics(lat: float, lon: float, households: int) -> tuple[dict, 
 def _fetch_usgs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
     flags: list[str] = []
     try:
-        start = (datetime.now(timezone.utc) - timedelta(days=180)).date().isoformat()
         url = (
             "https://earthquake.usgs.gov/fdsnws/event/1/query.geojson"
-            f"?format=geojson&starttime={start}&minmagnitude=4.5"
+            "?format=geojson&starttime=2026-01-01&minmagnitude=4.5"
             f"&minlatitude={lat-2.0}&maxlatitude={lat+2.0}&minlongitude={lon-2.0}&maxlongitude={lon+2.0}"
         )
         payload, from_cache, stale_used = _get_json(url, ttl_seconds=21600)
@@ -85,7 +96,7 @@ def _fetch_usgs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
         if stale_used:
             flags.append("usgs_stale_cache")
         return {"source": "usgs", "events_4p5_plus_lookback": count}, flags
-    except (CacheFetchError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
+    except Exception:
         flags.append("usgs_signal_unavailable")
         return {"source": "fallback", "events_4p5_plus_lookback": 0}, flags
 
@@ -94,10 +105,11 @@ def _fetch_gdacs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
     flags: list[str] = []
     try:
         raw, from_cache, stale_used = fetch_bytes_cached("https://www.gdacs.org/xml/rss.xml", ttl_seconds=21600)
-        root = ET.fromstring(raw.decode("utf-8", errors="replace"))
+        root = ET.fromstring(raw.decode("utf-8", errors="ignore"))
         nearby = 0
         for item in root.findall(".//item"):
-            p = item.find(GEORSS_POINT_TAG)
+            # georss point often appears as "lat lon"
+            p = item.find("{http://www.georss.org/georss}point")
             if p is None or not p.text:
                 continue
             parts = p.text.strip().split()
@@ -111,14 +123,7 @@ def _fetch_gdacs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
         if stale_used:
             flags.append("gdacs_stale_cache")
         return {"source": "gdacs", "nearby_alerts_500km": nearby}, flags
-    except (
-        CacheFetchError,
-        urllib.error.URLError,
-        TimeoutError,
-        ET.ParseError,
-        ValueError,
-        UnicodeDecodeError,
-    ):
+    except Exception:
         flags.append("gdacs_signal_unavailable")
         return {"source": "fallback", "nearby_alerts_500km": 0}, flags
 
@@ -146,9 +151,16 @@ def read_and_analyze_data(request: dict) -> dict:
 
     weather, wf = _fetch_weather(lat, lon)
     demographics, df = _fetch_demographics(lat, lon, households)
-    quality_flags.extend([*wf, *df])
+    usgs, uf = _fetch_usgs_signal(lat, lon)
+    gdacs, gf = _fetch_gdacs_signal(lat, lon)
+    quality_flags.extend([*wf, *df, *uf, *gf])
 
-    degraded = any(f.endswith("fallback") or f.endswith("stale_cache") for f in quality_flags)
+    degraded = any(
+        f.endswith("fallback")
+        or f.endswith("stale_cache")
+        or f.endswith("unavailable")
+        for f in quality_flags
+    )
 
     return {
         "status": "degraded" if degraded else "ok",
