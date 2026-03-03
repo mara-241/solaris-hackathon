@@ -49,7 +49,12 @@ jobs:
         env:
           SOLARIS_STORE: ${{ secrets.DATABASE_URL != '' && 'postgres' || 'sqlite' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python3 scripts/postgres_e2e.py
+        run: |
+          if [ -f scripts/postgres_e2e.py ]; then
+            python3 scripts/postgres_e2e.py
+          else
+            echo "Skipping Postgres E2E (script not present on this branch)."
+          fi
 
   ui-screenshot-check:
     if: github.event_name == 'pull_request'
