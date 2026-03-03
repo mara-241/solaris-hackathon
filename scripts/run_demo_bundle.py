@@ -26,7 +26,7 @@ def main() -> int:
         ok, out = run(cmd)
         checks[name] = {"ok": ok, "output": out[:3000]}
 
-    postgres_optional_ok = checks["postgres_e2e"]["ok"] or "\"skipped\": true" in checks["postgres_e2e"]["output"].lower()
+    postgres_optional_ok = checks["postgres_e2e"]["ok"]
     overall = (
         checks["train_nn"]["ok"]
         and checks["quality_gate"]["ok"]
