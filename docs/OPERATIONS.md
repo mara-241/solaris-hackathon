@@ -12,6 +12,7 @@ This playbook mirrors the agent-swarm workflow without tmux complexity.
 2. Spawn specialist agent for one task only.
 3. Agent updates branch locally.
 4. Run CI + review + smoke checks (`scripts/update_task_checks.py --id <task_id>`).
+4a. Run demo artifact generation (`python3 scripts/generate_demo_report.py`) for review package.
 5. Request explicit human `push` command (mandatory gate) and record it (`scripts/authorize_push.py`).
 6. Push/open PR only after explicit command.
 7. When all checks pass, send Telegram review-ready ping (`scripts/review_ready_ping.py`).
