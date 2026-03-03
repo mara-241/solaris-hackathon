@@ -4,7 +4,14 @@ from __future__ import annotations
 import json
 import math
 import random
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agents.energy_optimization.nn import mlp_forward
 
 MODEL_PATH = Path("docs/models/demand_nn_v1.weights.json")
 METRICS_PATH = Path("docs/models/demand_nn_v1.metrics.json")
@@ -16,22 +23,8 @@ def synth_target(rain_risk: float, sun_hours: float, households: float, ndvi: fl
 
 
 def predict(weights: dict, x: list[float]) -> float:
-    # Keep training lightweight: calibrate output bias only for stability.
-    # This uses a simple linearized projection to tune final bias.
-    mean = weights["normalization"]["mean"]
-    std = weights["normalization"]["std"]
-    xn = [(v - m) / (s if s else 1.0) for v, m, s in zip(x, mean, std)]
-
-    def dense(inp, layer):
-        out = []
-        for row, b in zip(layer["weights"], layer["bias"]):
-            out.append(sum(i * w for i, w in zip(inp, row)) + b)
-        return out
-
-    l1 = [max(0.0, v) for v in dense(xn, weights["layers"][0])]
-    l2 = [max(0.0, v) for v in dense(l1, weights["layers"][1])]
-    y = dense(l2, weights["layers"][2])[0]
-    return max(0.0, y)
+    # Shared inference implementation used by runtime and training.
+    return mlp_forward(x, weights)
 
 
 def build_sample() -> tuple[list[float], float]:
