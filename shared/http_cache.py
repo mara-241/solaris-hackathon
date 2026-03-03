@@ -3,11 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 CACHE_DIR = Path(__file__).resolve().parents[1] / ".cache" / "http"
+
+
+class CacheFetchError(RuntimeError):
+    pass
 
 
 def _cache_path(key: str) -> Path:
@@ -48,14 +53,22 @@ def fetch_json_cached(
             payload = json.loads(resp.read().decode("utf-8"))
         p.write_text(json.dumps({"ts": now, "payload": payload}))
         return payload, False, False
-    except Exception:
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
         if stale_ok and p.exists():
             cached = json.loads(p.read_text())
+            cached["last_error"] = type(exc).__name__
+            p.write_text(json.dumps(cached))
             return cached["payload"], True, True
-        raise
+        raise CacheFetchError(f"fetch_json_cached failed for {url}: {type(exc).__name__}") from exc
 
 
-def fetch_bytes_cached(url: str, *, timeout: int = 10, ttl_seconds: int = 86400, stale_ok: bool = True) -> tuple[bytes, bool, bool]:
+def fetch_bytes_cached(
+    url: str,
+    *,
+    timeout: int = 10,
+    ttl_seconds: int = 86400,
+    stale_ok: bool = True,
+) -> tuple[bytes, bool, bool]:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     p = _cache_path(url)
     now = time.time()
@@ -72,8 +85,10 @@ def fetch_bytes_cached(url: str, *, timeout: int = 10, ttl_seconds: int = 86400,
             raw = resp.read()
         p.write_text(json.dumps({"ts": now, "payload_hex": raw.hex()}))
         return raw, False, False
-    except Exception:
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         if stale_ok and p.exists():
             cached = json.loads(p.read_text())
+            cached["last_error"] = type(exc).__name__
+            p.write_text(json.dumps(cached))
             return bytes.fromhex(cached["payload_hex"]), True, True
-        raise
+        raise CacheFetchError(f"fetch_bytes_cached failed for {url}: {type(exc).__name__}") from exc
