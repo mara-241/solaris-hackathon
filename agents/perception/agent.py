@@ -1,30 +1,6 @@
 from __future__ import annotations
 
-import json
-import math
-import urllib.error
-from datetime import datetime, timedelta, timezone
-
-try:
-    from defusedxml import ElementTree as ET
-except ImportError:  # pragma: no cover
-    import xml.etree.ElementTree as ET
-
-from shared.http_cache import CacheFetchError, fetch_bytes_cached, fetch_json_cached
-from shared.validation import parse_households, parse_lat_lon
-
-GEORSS_POINT_TAG = "{http://www.georss.org/georss}point"
-WEATHER_DEFAULT_RAIN = 30
-WEATHER_DEFAULT_SUN_SECONDS = 18000
-
-
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    r = 6371.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
-    return r * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
+from shared.http_cache import fetch_json_cached
 
 
 def _get_json(url: str, timeout: int = 10, ttl_seconds: int = 3600):
@@ -160,18 +136,19 @@ def read_and_analyze_data(request: dict) -> dict:
     if not households_ok:
         quality_flags.append("invalid_households_defaulted")
 
+    quality_flags: list[str] = []
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        quality_flags.append("invalid_coordinates")
+        lat, lon = 0.0, 0.0
+    if households <= 0:
+        quality_flags.append("invalid_households_defaulted")
+        households = 100
+
     weather, wf = _fetch_weather(lat, lon)
     demographics, df = _fetch_demographics(lat, lon, households)
-    usgs, uf = _fetch_usgs_signal(lat, lon)
-    gdacs, gf = _fetch_gdacs_signal(lat, lon)
-    quality_flags.extend([*wf, *df, *uf, *gf])
+    quality_flags.extend([*wf, *df])
 
-    degraded = any(
-        f.endswith("fallback")
-        or f.endswith("stale_cache")
-        or f.endswith("unavailable")
-        for f in quality_flags
-    )
+    degraded = any(f.endswith("fallback") or f.endswith("stale_cache") for f in quality_flags)
 
     return {
         "status": "degraded" if degraded else "ok",
