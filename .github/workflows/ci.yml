@@ -51,6 +51,33 @@ jobs:
       - name: Run tests (includes degraded-path)
         run: pytest -q
 
+      - name: Postgres connectivity debug (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "Postgres debug: DATABASE_URL missing"
+            exit 0
+          fi
+          python3 - << 'PY'
+          import os
+          import psycopg
+
+          dsn = os.environ.get('DATABASE_URL', '')
+          try:
+              with psycopg.connect(dsn, connect_timeout=10) as conn:
+                  with conn.cursor() as cur:
+                      cur.execute('select 1')
+                      row = cur.fetchone()
+              print({'postgres_debug_ok': True, 'select_1': row[0] if row else None})
+          except Exception as exc:
+              msg = str(exc)
+              msg = msg.replace(dsn, '<redacted-dsn>')
+              print({'postgres_debug_ok': False, 'error_type': type(exc).__name__, 'error': msg[:500]})
+              raise
+          PY
+
       - name: Postgres E2E (strict when configured)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
