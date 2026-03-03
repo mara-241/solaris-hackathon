@@ -25,6 +25,9 @@ REQUIRED_OUTPUTS = {
     "scenario_set",
     "optimization_result",
     "quality",
+    "policy",
+    "profile",
+    "guardrail",
 }
 REQUIRED_QUALITY = {"status", "confidence", "fallback_used"}
 REQUIRED_RUNTIME = {"status", "agent_steps", "total_duration_ms"}

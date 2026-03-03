@@ -1,0 +1,17 @@
+{
+  "profile_version": "v1",
+  "user": {
+    "name": "default-operator",
+    "role": "ngo_program_manager"
+  },
+  "style": {
+    "response_mode": "balanced"
+  },
+  "priorities": {
+    "mode": "balanced",
+    "goal": "maximize_reliable_coverage"
+  },
+  "guardrails": {
+    "allow_external_actions": false
+  }
+}

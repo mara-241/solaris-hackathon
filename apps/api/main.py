@@ -68,6 +68,9 @@ def run_quality(run_id: str, x_api_key: str | None = Header(default=None)):
     outputs = item.get("outputs", {})
     feature_context = outputs.get("feature_context", {})
     quality = outputs.get("quality", {})
+    guardrail = outputs.get("guardrail", {})
+    policy = outputs.get("policy", {})
+    profile = outputs.get("profile", {})
     return {
         "run_id": run_id,
         "status": quality.get("status"),
@@ -76,6 +79,10 @@ def run_quality(run_id: str, x_api_key: str | None = Header(default=None)):
         "quality_flags": item.get("evidence_pack", {}).get("quality_flags", []),
         "provenance": outputs.get("provenance", {}),
         "runtime_errors": item.get("runtime", {}).get("errors", []),
+        "guardrail_status": guardrail.get("guardrail_status"),
+        "guardrail_flags": guardrail.get("guardrail_flags", []),
+        "policy_route": policy.get("policy_route"),
+        "profile_version": profile.get("profile_version"),
     }
 
 

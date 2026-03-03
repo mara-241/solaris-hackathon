@@ -43,6 +43,11 @@ Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts
 - `scripts/judge_run.py` — final pass/fail + artifact pointer output for judges
 - `scripts/smoke_test.py` and `scripts/smoke_api.py` — validation checks
 
+## Personalization + Guardrails
+- Profile context: `config/profile_context.json`
+- Feature flags: `GUARDRAILS_STRICT_MODE`, `POLICY_ROUTER_ENABLED`, `PERSONALIZATION_ENABLED`
+- Runtime trace fields: `outputs.policy`, `outputs.profile`, `outputs.guardrail`, optional `outputs.recommendation`
+
 ## Operating Docs
 - `docs/OPERATIONS.md`
 - `docs/DEFINITION_OF_DONE.md`
