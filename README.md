@@ -32,6 +32,9 @@ Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts
 - `scripts/review_ready_ping.py` — Telegram ping when task is fully review-ready
 - `scripts/update_task_checks.py` — auto-update checks from validation runs (+ codex/gemini status)
 - `scripts/set_review_checks.py` — set Codex/Gemini reviewer outcomes explicitly
+- `scripts/collect_review_evidence.py` — ingest reviewer evidence JSON into task checks
+- `scripts/train_demand_nn.py` — train/update NN v1 weights and metrics
+- `scripts/check_model_quality.py` — enforce MAE/RMSE quality gate
 - `scripts/demo_scenarios.py` — run rainy-season + high-growth demo scenarios
 - `scripts/fl_round_demo.py` — federated learning demo stub (FedAvg simulation)
 - `scripts/postgres_e2e.py` — Postgres end-to-end persistence check
