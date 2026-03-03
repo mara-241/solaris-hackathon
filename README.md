@@ -48,6 +48,64 @@ Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts
 - Feature flags: `GUARDRAILS_STRICT_MODE`, `POLICY_ROUTER_ENABLED`, `PERSONALIZATION_ENABLED`
 - Runtime trace fields: `outputs.policy`, `outputs.profile`, `outputs.guardrail`, optional `outputs.recommendation`
 
+## Local Quick Start (Teammates)
+
+### 1) Clone
+```bash
+git clone https://github.com/mara-241/solaris-hackathon.git
+cd solaris-hackathon
+```
+
+### 2) Create virtual environment
+
+Mac/Linux:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Windows (PowerShell):
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+### 3) Install dependencies
+```bash
+python -m pip install --upgrade pip
+pip install -r requirements.txt jsonschema
+```
+
+### 4) Run validation checks
+```bash
+python scripts/smoke_test.py
+python scripts/validate_vlm_contract.py
+python scripts/run_demo_bundle.py
+python scripts/judge_run.py
+```
+
+### 5) Run API server
+```bash
+uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 6) Test API
+```bash
+curl -X POST http://127.0.0.1:8000/run \
+  -H "Content-Type: application/json" \
+  -d '{"request_id":"local-1","lat":-1.2921,"lon":36.8219,"horizon_days":30,"households":120,"usage_profile":"mixed"}'
+```
+
+If auth is enabled, add:
+```bash
+-H "x-api-key: <SOLARIS_API_TOKEN>"
+```
+
+### Common issues
+- `python3` not found on Windows -> use `python` or `py`
+- `uvicorn` not found -> re-run dependency install
+- 401 unauthorized on `/run` -> missing/wrong `x-api-key` when `SOLARIS_API_TOKEN` is set
+
 ## Operating Docs
 - `docs/OPERATIONS.md`
 - `docs/DEFINITION_OF_DONE.md`
