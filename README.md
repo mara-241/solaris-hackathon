@@ -36,6 +36,7 @@ Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts
 - `scripts/train_demand_nn.py` — train/update NN v1 weights and metrics
 - `scripts/check_model_quality.py` — enforce MAE/RMSE quality gate
 - `scripts/demo_scenarios.py` — run rainy-season + high-growth demo scenarios
+- `scripts/generate_demo_report.py` — generate markdown scenario/impact report for judges
 - `scripts/fl_round_demo.py` — federated learning demo stub (FedAvg simulation)
 - `scripts/postgres_e2e.py` — Postgres end-to-end persistence check
 - `scripts/run_demo_bundle.py` — one-command judge/demo bundle
