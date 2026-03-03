@@ -1,6 +1,7 @@
 {
-  "mae": 81.3857,
-  "rmse": 94.0813,
-  "samples": 220,
-  "epochs": 80
+  "model_name": "demand_nn_v1_tiny_mlp",
+  "samples_eval": 200,
+  "mae": 81.0817,
+  "rmse": 94.0695,
+  "dataset": "synthetic_v1"
 }
