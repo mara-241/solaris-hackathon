@@ -5,12 +5,13 @@ import os
 from pathlib import Path
 
 from agents.energy_optimization.impact import compute_impact_metrics
+from agents.energy_optimization.nn import mlp_forward
 
 USAGE_CLASSES = ["mixed", "productive-use-heavy", "residential"]
 DENSITY_CLASSES = ["low", "medium", "high", "unknown"]
 
-DEFAULT_MAX_MAE = "120.0"
-DEFAULT_MAX_RMSE = "140.0"
+DEFAULT_MAX_MAE = 120.0
+DEFAULT_MAX_RMSE = 140.0
 
 
 def _one_hot(value: str, classes: list[str]) -> list[float]:
@@ -40,60 +41,36 @@ def _build_feature_vector(feature_context: dict) -> list[float]:
     ]
 
 
-def _relu(vec: list[float]) -> list[float]:
-    return [max(0.0, v) for v in vec]
 
 
-def _dense(x: list[float], w: list[list[float]], b: list[float]) -> list[float]:
-    out: list[float] = []
-    for row, bias in zip(w, b):
-        out.append(sum(v * rw for v, rw in zip(x, row)) + bias)
-    return out
-
-
-def _mlp_forward(x: list[float], model: dict) -> float:
-    mu = model["normalization"]["mean"]
-    sigma = model["normalization"]["std"]
-    xn = [(v - m) / (s if s != 0 else 1.0) for v, m, s in zip(x, mu, sigma)]
-
-    l1 = _relu(_dense(xn, model["layers"][0]["weights"], model["layers"][0]["bias"]))
-    l2 = _relu(_dense(l1, model["layers"][1]["weights"], model["layers"][1]["bias"]))
-    y = _dense(l2, model["layers"][2]["weights"], model["layers"][2]["bias"])[0]
-    return max(0.0, float(y))
+def _fallback_meta(reason: str) -> dict:
+    return {"model_input_version": "v1", "nn_used": False, "nn_fallback_reason": reason}
 
 
 def _nn_predict(feature_context: dict) -> tuple[float | None, dict]:
     enabled = os.getenv("DEMAND_NN_ENABLED", "false").lower() == "true"
     model_path = Path(os.getenv("DEMAND_NN_MODEL_PATH", "docs/models/demand_nn_v1.weights.json"))
     metrics_path = Path(os.getenv("DEMAND_NN_METRICS_PATH", "docs/models/demand_nn_v1.metrics.json"))
-    max_mae = float(os.getenv("DEMAND_NN_MAX_MAE", DEFAULT_MAX_MAE))
-    max_rmse = float(os.getenv("DEMAND_NN_MAX_RMSE", DEFAULT_MAX_RMSE))
+    max_mae = float(os.getenv("DEMAND_NN_MAX_MAE", str(DEFAULT_MAX_MAE)))
+    max_rmse = float(os.getenv("DEMAND_NN_MAX_RMSE", str(DEFAULT_MAX_RMSE)))
 
     if not enabled:
-        return None, {"model_input_version": "v1", "nn_used": False, "nn_fallback_reason": "nn_disabled"}
+        return None, _fallback_meta("nn_disabled")
     if not model_path.exists():
-        return None, {"model_input_version": "v1", "nn_used": False, "nn_fallback_reason": "model_unavailable"}
+        return None, _fallback_meta("model_unavailable")
 
     if metrics_path.exists():
         try:
             m = json.loads(metrics_path.read_text())
             if float(m.get("mae", 1e9)) > max_mae or float(m.get("rmse", 1e9)) > max_rmse:
-                return None, {
-                    "model_input_version": "v1",
-                    "nn_used": False,
-                    "nn_fallback_reason": "quality_gate_failed",
-                }
+                return None, _fallback_meta("quality_gate_failed")
         except (OSError, json.JSONDecodeError, ValueError):
-            return None, {
-                "model_input_version": "v1",
-                "nn_used": False,
-                "nn_fallback_reason": "metrics_read_error",
-            }
+            return None, _fallback_meta("metrics_read_error")
 
     try:
         model = json.loads(model_path.read_text())
         x = _build_feature_vector(feature_context)
-        pred = _mlp_forward(x, model)
+        pred = mlp_forward(x, model)
         return round(pred, 2), {
             "model_input_version": model.get("model_input_version", "v1"),
             "nn_used": True,
@@ -101,11 +78,7 @@ def _nn_predict(feature_context: dict) -> tuple[float | None, dict]:
             "nn_fallback_reason": None,
         }
     except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
-        return None, {
-            "model_input_version": "v1",
-            "nn_used": False,
-            "nn_fallback_reason": f"inference_error:{type(exc).__name__}",
-        }
+        return None, _fallback_meta(f"inference_error:{type(exc).__name__}")
 
 
 def optimize_energy_plan(feature_context: dict) -> dict:
