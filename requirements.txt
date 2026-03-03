@@ -3,3 +3,4 @@ uvicorn
 pytest
 psycopg[binary]
 defusedxml
+ruff
