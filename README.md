@@ -76,7 +76,18 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt jsonschema
 ```
 
-### 4) Run validation checks
+### 4) Run preflight (required)
+```bash
+python scripts/preflight_check.py
+```
+
+If preflight fails, fix environment first:
+```bash
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### 5) Run validation checks
 ```bash
 python scripts/smoke_test.py
 python scripts/validate_vlm_contract.py
@@ -84,12 +95,12 @@ python scripts/run_demo_bundle.py
 python scripts/judge_run.py
 ```
 
-### 5) Run API server
+### 6) Run API server
 ```bash
 uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 6) Test API
+### 7) Test API
 ```bash
 curl -X POST http://127.0.0.1:8000/run \
   -H "Content-Type: application/json" \
