@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parents[2] / "db" / "solaris.db"
-SCHEMA_SQL_PATH = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
 
 
 class RunStore(ABC):
@@ -146,12 +145,36 @@ class PostgresRunStore(RunStore):
         return self.psycopg.connect(self.dsn)
 
     def init(self) -> None:
-        # Best effort: apply full schema if available, plus safety creation of required runtime tables.
         with self._connect() as conn:
             with conn.cursor() as cur:
-                if SCHEMA_SQL_PATH.exists():
-                    cur.execute(SCHEMA_SQL_PATH.read_text())
-
+                cur.execute(
+                    """
+                    create table if not exists sites (
+                      id bigserial primary key,
+                      site_key text unique,
+                      lat double precision not null,
+                      lon double precision not null,
+                      region text,
+                      country text,
+                      created_at timestamptz not null default now()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    create table if not exists runs (
+                      id bigserial primary key,
+                      run_id text unique not null,
+                      site_id bigint references sites(id),
+                      status text not null default 'ok',
+                      started_at timestamptz not null default now(),
+                      finished_at timestamptz,
+                      request_payload jsonb not null,
+                      output_payload jsonb,
+                      confidence_score double precision
+                    )
+                    """
+                )
                 cur.execute(
                     """
                     create table if not exists agent_steps (
@@ -191,13 +214,33 @@ class PostgresRunStore(RunStore):
         runtime = result.get("runtime", {})
         evidence = result.get("evidence_pack", {})
 
+        request_payload = result.get("request", {})
+        lat = request_payload.get("lat")
+        lon = request_payload.get("lon")
+
         with self._connect() as conn:
             with conn.cursor() as cur:
+                site_id = None
+                if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                    site_key = f"{round(float(lat), 6)}:{round(float(lon), 6)}"
+                    cur.execute(
+                        """
+                        insert into sites(site_key, lat, lon)
+                        values(%s, %s, %s)
+                        on conflict(site_key) do update set lat=excluded.lat, lon=excluded.lon
+                        returning id
+                        """,
+                        (site_key, lat, lon),
+                    )
+                    row = cur.fetchone()
+                    site_id = row[0] if row else None
+
                 cur.execute(
                     """
-                    insert into runs(run_id, status, started_at, finished_at, request_payload, output_payload, confidence_score)
-                    values(%s, %s, now(), now(), %s::jsonb, %s::jsonb, %s)
+                    insert into runs(run_id, site_id, status, started_at, finished_at, request_payload, output_payload, confidence_score)
+                    values(%s, %s, %s, now(), now(), %s::jsonb, %s::jsonb, %s)
                     on conflict (run_id) do update set
+                      site_id=excluded.site_id,
                       status=excluded.status,
                       finished_at=excluded.finished_at,
                       request_payload=excluded.request_payload,
@@ -206,8 +249,9 @@ class PostgresRunStore(RunStore):
                     """,
                     (
                         result["run_id"],
+                        site_id,
                         quality["status"],
-                        json.dumps(result.get("request", {})),
+                        json.dumps(request_payload),
                         json.dumps(result),
                         quality["confidence"],
                     ),

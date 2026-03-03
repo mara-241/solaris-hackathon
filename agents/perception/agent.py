@@ -3,12 +3,24 @@ from __future__ import annotations
 import json
 import math
 import urllib.error
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
+try:
+    from defusedxml import ElementTree as ET
+except ImportError:  # pragma: no cover
+    import xml.etree.ElementTree as ET
+
+from typing import Any
+
 from shared.http_cache import CacheFetchError, fetch_bytes_cached, fetch_json_cached
+from shared.validation import parse_households, parse_lat_lon
 
 GEORSS_POINT_TAG = "{http://www.georss.org/georss}point"
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
+WORLD_BANK_POP_URL = "https://api.worldbank.org/v2/country/{code}/indicator/SP.POP.TOTL?format=json"
+USGS_EVENTS_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query.geojson"
+GDACS_RSS_URL = "https://www.gdacs.org/xml/rss.xml"
 WEATHER_DEFAULT_RAIN = 30
 WEATHER_DEFAULT_SUN_SECONDS = 18000
 
@@ -22,7 +34,7 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return r * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
 
-def _get_json(url: str, timeout: int = 10, ttl_seconds: int = 3600):
+def _get_json(url: str, timeout: int = 10, ttl_seconds: int = 3600) -> tuple[Any, bool, bool]:
     payload, from_cache, stale_used = fetch_json_cached(url, timeout=timeout, ttl_seconds=ttl_seconds, stale_ok=True)
     return payload, from_cache, stale_used
 
@@ -31,7 +43,7 @@ def _fetch_weather(lat: float, lon: float) -> tuple[dict, list[str]]:
     flags: list[str] = []
     try:
         url = (
-            "https://api.open-meteo.com/v1/forecast"
+            f"{OPEN_METEO_URL}"
             f"?latitude={lat}&longitude={lon}&daily=precipitation_probability_max,sunshine_duration"
             "&forecast_days=3&timezone=UTC"
         )
@@ -53,7 +65,7 @@ def _fetch_weather(lat: float, lon: float) -> tuple[dict, list[str]]:
 
 def _reverse_country_code(lat: float, lon: float) -> str | None:
     try:
-        url = f"https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&zoom=3"
+        url = f"{NOMINATIM_REVERSE_URL}?format=jsonv2&lat={lat}&lon={lon}&zoom=3"
         payload, _, _ = _get_json(url, ttl_seconds=43200)
         return payload.get("address", {}).get("country_code", "").upper() or None
     except (CacheFetchError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
@@ -68,7 +80,7 @@ def _fetch_demographics(lat: float, lon: float, households: int) -> tuple[dict, 
         return {"source": "fallback", "households": households, "country_code": None}, flags
 
     try:
-        url = f"https://api.worldbank.org/v2/country/{code}/indicator/SP.POP.TOTL?format=json"
+        url = WORLD_BANK_POP_URL.format(code=code)
         payload, from_cache, stale_used = _get_json(url, ttl_seconds=86400)
         rows = payload[1] if isinstance(payload, list) and len(payload) > 1 else []
         latest = next((r for r in rows if r.get("value") is not None), None)
@@ -93,7 +105,7 @@ def _fetch_usgs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
     try:
         start = (datetime.now(timezone.utc) - timedelta(days=180)).date().isoformat()
         url = (
-            "https://earthquake.usgs.gov/fdsnws/event/1/query.geojson"
+            f"{USGS_EVENTS_URL}"
             f"?format=geojson&starttime={start}&minmagnitude=4.5"
             f"&minlatitude={lat-2.0}&maxlatitude={lat+2.0}&minlongitude={lon-2.0}&maxlongitude={lon+2.0}"
         )
@@ -112,7 +124,7 @@ def _fetch_usgs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
 def _fetch_gdacs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
     flags: list[str] = []
     try:
-        raw, from_cache, stale_used = fetch_bytes_cached("https://www.gdacs.org/xml/rss.xml", ttl_seconds=21600)
+        raw, from_cache, stale_used = fetch_bytes_cached(GDACS_RSS_URL, ttl_seconds=21600)
         root = ET.fromstring(raw.decode("utf-8", errors="replace"))
         nearby = 0
         for item in root.findall(".//item"):

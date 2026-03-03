@@ -18,6 +18,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Solaris API", version="0.4.2", lifespan=lifespan)
 API_AUTH_TOKEN = os.getenv("SOLARIS_API_TOKEN", "").strip()
+REQUIRE_API_AUTH = os.getenv("SOLARIS_API_REQUIRE_AUTH", "true").lower() == "true"
 
 
 class RunRequest(BaseModel):
@@ -30,8 +31,10 @@ class RunRequest(BaseModel):
 
 
 def _require_auth(x_api_key: str | None) -> None:
-    if not API_AUTH_TOKEN:
+    if not REQUIRE_API_AUTH:
         return
+    if not API_AUTH_TOKEN:
+        raise HTTPException(status_code=503, detail="api auth token not configured")
     if not x_api_key or x_api_key != API_AUTH_TOKEN:
         raise HTTPException(status_code=401, detail="unauthorized")
 
@@ -66,7 +69,6 @@ def run_quality(run_id: str, x_api_key: str | None = Header(default=None)):
         raise HTTPException(status_code=404, detail="run not found")
 
     outputs = item.get("outputs", {})
-    feature_context = outputs.get("feature_context", {})
     quality = outputs.get("quality", {})
     return {
         "run_id": run_id,
