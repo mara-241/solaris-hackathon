@@ -73,7 +73,7 @@ def run_quality(run_id: str, x_api_key: str | None = Header(default=None)):
         "status": quality.get("status"),
         "confidence": quality.get("confidence"),
         "fallback_used": quality.get("fallback_used"),
-        "quality_flags": feature_context.get("quality_flags", []),
+        "quality_flags": item.get("evidence_pack", {}).get("quality_flags", []),
         "provenance": outputs.get("provenance", {}),
         "runtime_errors": item.get("runtime", {}).get("errors", []),
     }

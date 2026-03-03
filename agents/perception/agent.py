@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 import math
 import urllib.error
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
+try:
+    from defusedxml import ElementTree as ET
+except ImportError:  # pragma: no cover
+    import xml.etree.ElementTree as ET
+
 from shared.http_cache import CacheFetchError, fetch_bytes_cached, fetch_json_cached
+from shared.validation import parse_households, parse_lat_lon
 
 GEORSS_POINT_TAG = "{http://www.georss.org/georss}point"
 WEATHER_DEFAULT_RAIN = 30
@@ -147,24 +152,13 @@ def read_and_analyze_data(request: dict) -> dict:
     usage_profile = request.get("usage_profile") or "mixed"
 
     quality_flags: list[str] = []
-    try:
-        lat = float(request.get("lat", 0.0))
-        lon = float(request.get("lon", 0.0))
-    except (TypeError, ValueError):
+    lat, lon, coords_ok = parse_lat_lon(request)
+    if not coords_ok:
         quality_flags.append("invalid_coordinates")
-        lat, lon = 0.0, 0.0
 
-    try:
-        households = int(raw_households if raw_households is not None else 100)
-        if households <= 0:
-            raise ValueError
-    except (TypeError, ValueError):
+    households, households_ok = parse_households(raw_households, default=100)
+    if not households_ok:
         quality_flags.append("invalid_households_defaulted")
-        households = 100
-
-    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
-        quality_flags.append("invalid_coordinates")
-        lat, lon = 0.0, 0.0
 
     weather, wf = _fetch_weather(lat, lon)
     demographics, df = _fetch_demographics(lat, lon, households)

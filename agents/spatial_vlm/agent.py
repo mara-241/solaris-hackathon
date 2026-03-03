@@ -7,6 +7,7 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 from shared.http_cache import CacheFetchError, fetch_bytes_cached, fetch_json_cached
+from shared.validation import parse_lat_lon
 
 TILE_SAMPLE_BYTES = 5000  # heuristic byte window for quick MVP texture proxy
 
@@ -51,7 +52,7 @@ out count;
             try:
                 count = int(tags.get("total"))
             except (TypeError, ValueError):
-                count = len(elems)
+                count = None
         if from_cache:
             flags.append("overpass_cache_hit")
         if stale_used:
@@ -104,13 +105,9 @@ def _fetch_planetary_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
 
 
 def analyze_spatial_context(request: dict) -> dict:
-    try:
-        lat = float(request.get("lat", 0.0))
-        lon = float(request.get("lon", 0.0))
-    except (TypeError, ValueError):
-        lat, lon = 0.0, 0.0
+    lat, lon, coords_ok = parse_lat_lon(request)
 
-    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+    if not coords_ok:
         return {
             "status": "degraded",
             "confidence": 0.35,
@@ -148,7 +145,7 @@ def analyze_spatial_context(request: dict) -> dict:
             roof_est = max(roof_est, overpass_count)
             density = "high" if roof_est > 120 else ("medium" if roof_est > 70 else "low")
 
-        degraded = stale_used or any(f.endswith("unavailable") or f.endswith("stale_cache") for f in flags)
+        degraded = any(f.endswith("unavailable") or f.endswith("stale_cache") for f in flags)
 
         return {
             "status": "degraded" if degraded else "ok",
