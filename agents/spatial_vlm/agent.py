@@ -4,7 +4,6 @@ import json
 import math
 import urllib.error
 import urllib.parse
-from datetime import datetime, timedelta, timezone
 
 from shared.http_cache import CacheFetchError, fetch_bytes_cached, fetch_json_cached
 from shared.validation import parse_lat_lon
@@ -49,10 +48,7 @@ out count;
         count = None
         if elems:
             tags = elems[0].get("tags", {})
-            try:
-                count = int(tags.get("total"))
-            except (TypeError, ValueError):
-                count = None
+            count = int(tags.get("total", 0)) if str(tags.get("total", "")).isdigit() else len(elems)
         if from_cache:
             flags.append("overpass_cache_hit")
         if stale_used:
@@ -66,12 +62,10 @@ out count;
 def _fetch_planetary_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
     flags: list[str] = []
     try:
-        end = datetime.now(timezone.utc).date()
-        start = end - timedelta(days=180)
         body = {
             "collections": ["sentinel-2-l2a"],
             "bbox": [lon - 0.2, lat - 0.2, lon + 0.2, lat + 0.2],
-            "datetime": f"{start.isoformat()}/{end.isoformat()}",
+            "datetime": "2025-10-01/2026-03-03",
             "limit": 25,
         }
         payload, from_cache, stale_used = fetch_json_cached(
@@ -108,6 +102,22 @@ def analyze_spatial_context(request: dict) -> dict:
     lat, lon, coords_ok = parse_lat_lon(request)
 
     if not coords_ok:
+        return {
+            "status": "degraded",
+            "confidence": 0.35,
+            "assumptions": ["Spatial adapter received invalid coordinates; using fallback priors."],
+            "quality_flags": ["invalid_coordinates", "spatial_imagery_fallback"],
+            "imagery": {"provider": "fallback", "compressed": False},
+            "feature_summaries": {
+                "ndvi_mean": 0.35,
+                "roof_count_estimate": request.get("households") or 100,
+                "settlement_density": "unknown",
+            },
+            "visual_embeddings_ref": None,
+            "fallback_used": True,
+        }
+
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
         return {
             "status": "degraded",
             "confidence": 0.35,

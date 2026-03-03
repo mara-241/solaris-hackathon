@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import urllib.error
-from datetime import datetime, timedelta, timezone
+import xml.etree.ElementTree as ET
 
 try:
     from defusedxml import ElementTree as ET
@@ -12,10 +12,6 @@ except ImportError:  # pragma: no cover
 
 from shared.http_cache import CacheFetchError, fetch_bytes_cached, fetch_json_cached
 from shared.validation import parse_households, parse_lat_lon
-
-GEORSS_POINT_TAG = "{http://www.georss.org/georss}point"
-WEATHER_DEFAULT_RAIN = 30
-WEATHER_DEFAULT_SUN_SECONDS = 18000
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -96,10 +92,9 @@ def _fetch_demographics(lat: float, lon: float, households: int) -> tuple[dict, 
 def _fetch_usgs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
     flags: list[str] = []
     try:
-        start = (datetime.now(timezone.utc) - timedelta(days=180)).date().isoformat()
         url = (
             "https://earthquake.usgs.gov/fdsnws/event/1/query.geojson"
-            f"?format=geojson&starttime={start}&minmagnitude=4.5"
+            "?format=geojson&starttime=2026-01-01&minmagnitude=4.5"
             f"&minlatitude={lat-2.0}&maxlatitude={lat+2.0}&minlongitude={lon-2.0}&maxlongitude={lon+2.0}"
         )
         payload, from_cache, stale_used = _get_json(url, ttl_seconds=21600)
@@ -121,7 +116,7 @@ def _fetch_gdacs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
         root = ET.fromstring(raw.decode("utf-8", errors="replace"))
         nearby = 0
         for item in root.findall(".//item"):
-            p = item.find(GEORSS_POINT_TAG)
+            p = item.find("{http://www.georss.org/georss}point")
             if p is None or not p.text:
                 continue
             parts = p.text.strip().split()
@@ -159,6 +154,14 @@ def read_and_analyze_data(request: dict) -> dict:
     households, households_ok = parse_households(raw_households, default=100)
     if not households_ok:
         quality_flags.append("invalid_households_defaulted")
+
+    quality_flags: list[str] = []
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        quality_flags.append("invalid_coordinates")
+        lat, lon = 0.0, 0.0
+    if households <= 0:
+        quality_flags.append("invalid_households_defaulted")
+        households = 100
 
     weather, wf = _fetch_weather(lat, lon)
     demographics, df = _fetch_demographics(lat, lon, households)
