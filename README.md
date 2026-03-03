@@ -10,12 +10,12 @@ Given a village (`lat/lon`, households, usage profile), produce:
 - Map-ready payload + concise report
 
 ## Repository Structure
-- `agents/` — domain agents (orchestrator, data, EO, forecast, sizing, report)
+- `agents/` — orchestrator + perception + spatial_vlm + energy_optimization + evidence
 - `shared/schemas/` — pipeline contracts (source of truth)
-- `apps/api/` — API backend
-- `apps/web/` — map/report frontend
+- `apps/api/` — API backend (`/run`, `/run/{id}`, `/health`)
+- `db/` — SQL schema scaffold for Postgres
 - `tests/` — unit + smoke tests
-- `docs/` — architecture, PRD notes, demo script
+- `docs/` — architecture, operations, implementation plan
 
 ## Team Workflow
 - Branch from `main` with short-lived feature branches
@@ -29,4 +29,5 @@ Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts
 - `docs/OPERATIONS.md`
 - `docs/DEFINITION_OF_DONE.md`
 - `docs/PR_POLICY.md`
+- `docs/SECRETS_AND_ENV.md`
 - `active-tasks.json`
