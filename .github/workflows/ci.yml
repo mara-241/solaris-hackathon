@@ -33,22 +33,23 @@ jobs:
           print('Schema smoke check passed')
           PY
 
+      - name: Train NN v1 (synthetic)
+        run: python3 scripts/train_demand_nn.py
+
+      - name: NN quality gate
+        run: python3 scripts/check_model_quality.py --metrics docs/models/demand_nn_v1.metrics.json --max-mae 120 --max-rmse 140
+
       - name: Golden-path smoke
         run: python3 scripts/smoke_test.py
 
       - name: Run tests (includes degraded-path)
         run: pytest -q
 
-      - name: Optional Postgres E2E (env-gated)
+      - name: Optional Postgres E2E
         env:
-          SOLARIS_STORE: ${{ vars.SOLARIS_STORE }}
+          SOLARIS_STORE: ${{ secrets.DATABASE_URL != '' && 'postgres' || 'sqlite' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          if [ "${SOLARIS_STORE:-}" = "postgres" ] && [ -n "${DATABASE_URL:-}" ]; then
-            python3 scripts/postgres_e2e.py --require
-          else
-            echo "Skipping Postgres E2E: SOLARIS_STORE/DATABASE_URL not configured"
-          fi
+        run: python3 scripts/postgres_e2e.py
 
   ui-screenshot-check:
     if: github.event_name == 'pull_request'
