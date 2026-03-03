@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import math
+import urllib.error
 import xml.etree.ElementTree as ET
 
-from shared.http_cache import fetch_bytes_cached, fetch_json_cached
+from shared.http_cache import CacheFetchError, fetch_bytes_cached, fetch_json_cached
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -96,7 +98,7 @@ def _fetch_usgs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
         if stale_used:
             flags.append("usgs_stale_cache")
         return {"source": "usgs", "events_4p5_plus_lookback": count}, flags
-    except Exception:
+    except (CacheFetchError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
         flags.append("usgs_signal_unavailable")
         return {"source": "fallback", "events_4p5_plus_lookback": 0}, flags
 
@@ -105,10 +107,9 @@ def _fetch_gdacs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
     flags: list[str] = []
     try:
         raw, from_cache, stale_used = fetch_bytes_cached("https://www.gdacs.org/xml/rss.xml", ttl_seconds=21600)
-        root = ET.fromstring(raw.decode("utf-8", errors="ignore"))
+        root = ET.fromstring(raw.decode("utf-8", errors="replace"))
         nearby = 0
         for item in root.findall(".//item"):
-            # georss point often appears as "lat lon"
             p = item.find("{http://www.georss.org/georss}point")
             if p is None or not p.text:
                 continue
@@ -123,7 +124,14 @@ def _fetch_gdacs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
         if stale_used:
             flags.append("gdacs_stale_cache")
         return {"source": "gdacs", "nearby_alerts_500km": nearby}, flags
-    except Exception:
+    except (
+        CacheFetchError,
+        urllib.error.URLError,
+        TimeoutError,
+        ET.ParseError,
+        ValueError,
+        UnicodeDecodeError,
+    ):
         flags.append("gdacs_signal_unavailable")
         return {"source": "fallback", "nearby_alerts_500km": 0}, flags
 

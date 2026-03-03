@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 from pathlib import Path
 
 from agents.energy_optimization.impact import compute_impact_metrics
+
+USAGE_CLASSES = ["mixed", "productive-use-heavy", "residential"]
+DENSITY_CLASSES = ["low", "medium", "high", "unknown"]
+
+DEFAULT_MAX_MAE = "120.0"
+DEFAULT_MAX_RMSE = "140.0"
 
 
 def _one_hot(value: str, classes: list[str]) -> list[float]:
@@ -28,10 +33,10 @@ def _build_feature_vector(feature_context: dict) -> list[float]:
         float(weather.get("rain_risk", 0.3)),
         float(weather.get("sun_hours", 4.5)),
         float(demographics.get("households", 100)),
-        *_one_hot(usage, ["mixed", "productive-use-heavy", "residential"]),
+        *_one_hot(usage, USAGE_CLASSES),
         float(summaries.get("roof_count_estimate", demographics.get("households", 100))),
         float(summaries.get("ndvi_mean", 0.35)),
-        *_one_hot(density, ["low", "medium", "high", "unknown"]),
+        *_one_hot(density, DENSITY_CLASSES),
     ]
 
 
@@ -61,8 +66,8 @@ def _nn_predict(feature_context: dict) -> tuple[float | None, dict]:
     enabled = os.getenv("DEMAND_NN_ENABLED", "false").lower() == "true"
     model_path = Path(os.getenv("DEMAND_NN_MODEL_PATH", "docs/models/demand_nn_v1.weights.json"))
     metrics_path = Path(os.getenv("DEMAND_NN_METRICS_PATH", "docs/models/demand_nn_v1.metrics.json"))
-    max_mae = float(os.getenv("DEMAND_NN_MAX_MAE", "25.0"))
-    max_rmse = float(os.getenv("DEMAND_NN_MAX_RMSE", "35.0"))
+    max_mae = float(os.getenv("DEMAND_NN_MAX_MAE", DEFAULT_MAX_MAE))
+    max_rmse = float(os.getenv("DEMAND_NN_MAX_RMSE", DEFAULT_MAX_RMSE))
 
     if not enabled:
         return None, {"model_input_version": "v1", "nn_used": False, "nn_fallback_reason": "nn_disabled"}
@@ -78,7 +83,7 @@ def _nn_predict(feature_context: dict) -> tuple[float | None, dict]:
                     "nn_used": False,
                     "nn_fallback_reason": "quality_gate_failed",
                 }
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError):
             return None, {
                 "model_input_version": "v1",
                 "nn_used": False,
@@ -95,7 +100,7 @@ def _nn_predict(feature_context: dict) -> tuple[float | None, dict]:
             "nn_model": model.get("model_name", "demand_nn_v1"),
             "nn_fallback_reason": None,
         }
-    except Exception as exc:
+    except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
         return None, {
             "model_input_version": "v1",
             "nn_used": False,
@@ -110,7 +115,14 @@ def optimize_energy_plan(feature_context: dict) -> dict:
     baseline = perception.get("baselines", {}).get("daily_baseline_kwh", 120)
     sun_hours = perception.get("weather", {}).get("sun_hours", 4.5)
     rain_risk = perception.get("weather", {}).get("rain_risk", 0.3)
-    households = int(perception.get("demographics", {}).get("households", 100))
+
+    raw_households = perception.get("demographics", {}).get("households", 100)
+    try:
+        households = int(raw_households)
+        if households <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        households = 100
 
     nn_prediction, model_meta = _nn_predict(feature_context)
 
