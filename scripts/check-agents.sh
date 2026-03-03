@@ -12,10 +12,16 @@ echo "=== Solaris task status snapshot ==="
 python3 - << 'PY'
 import json
 from pathlib import Path
-p = Path('active-tasks.json')
-data = json.loads(p.read_text())
+
+required = ["ci", "goldenPath", "eoFallback", "codexReview", "geminiReview", "pushAuthorized"]
+data = json.loads(Path('active-tasks.json').read_text())
 for t in data.get('tasks', []):
-    print(f"- {t.get('id')}: {t.get('status')} | branch={t.get('branch')} | pr={t.get('pr') or '-'}")
+    checks = t.get('checks', {})
+    missing = [k for k in required if checks.get(k) != 'pass']
+    ready = 'yes' if not missing else 'no'
+    print(f"- {t.get('id')}: {t.get('status')} | branch={t.get('branch')} | pr={t.get('pr') or '-'} | review_ready={ready}")
+    if missing:
+        print(f"    missing: {', '.join(missing)}")
 PY
 
-echo "Tip: notify only on blocked/failed/done transitions."
+echo "Tip: send Telegram ping only when review_ready=yes."
