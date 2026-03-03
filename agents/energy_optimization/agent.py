@@ -60,11 +60,30 @@ def _mlp_forward(x: list[float], model: dict) -> float:
 def _nn_predict(feature_context: dict) -> tuple[float | None, dict]:
     enabled = os.getenv("DEMAND_NN_ENABLED", "false").lower() == "true"
     model_path = Path(os.getenv("DEMAND_NN_MODEL_PATH", "docs/models/demand_nn_v1.weights.json"))
+    metrics_path = Path(os.getenv("DEMAND_NN_METRICS_PATH", "docs/models/demand_nn_v1.metrics.json"))
+    max_mae = float(os.getenv("DEMAND_NN_MAX_MAE", "25.0"))
+    max_rmse = float(os.getenv("DEMAND_NN_MAX_RMSE", "35.0"))
 
     if not enabled:
         return None, {"model_input_version": "v1", "nn_used": False, "nn_fallback_reason": "nn_disabled"}
     if not model_path.exists():
         return None, {"model_input_version": "v1", "nn_used": False, "nn_fallback_reason": "model_unavailable"}
+
+    if metrics_path.exists():
+        try:
+            m = json.loads(metrics_path.read_text())
+            if float(m.get("mae", 1e9)) > max_mae or float(m.get("rmse", 1e9)) > max_rmse:
+                return None, {
+                    "model_input_version": "v1",
+                    "nn_used": False,
+                    "nn_fallback_reason": "quality_gate_failed",
+                }
+        except Exception:
+            return None, {
+                "model_input_version": "v1",
+                "nn_used": False,
+                "nn_fallback_reason": "metrics_read_error",
+            }
 
     try:
         model = json.loads(model_path.read_text())

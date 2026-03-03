@@ -39,6 +39,17 @@ jobs:
       - name: Run tests (includes degraded-path)
         run: pytest -q
 
+      - name: Optional Postgres E2E (env-gated)
+        env:
+          SOLARIS_STORE: ${{ vars.SOLARIS_STORE }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ "${SOLARIS_STORE:-}" = "postgres" ] && [ -n "${DATABASE_URL:-}" ]; then
+            python3 scripts/postgres_e2e.py --require
+          else
+            echo "Skipping Postgres E2E: SOLARIS_STORE/DATABASE_URL not configured"
+          fi
+
   ui-screenshot-check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
