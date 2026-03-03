@@ -6,8 +6,14 @@ def read_and_analyze_data(request: dict) -> dict:
     demographics = {"source": "world-bank", "households": households}
 
     return {
+        "status": "ok",
+        "confidence": 0.82,
+        "assumptions": [
+            "Household-level baseline load factor is used.",
+            "Weather input is a near-term proxy, not live sensor telemetry.",
+        ],
+        "quality_flags": [],
         "weather": weather,
         "demographics": demographics,
         "baselines": {"usage_profile": usage_profile, "daily_baseline_kwh": households * 1.4},
-        "confidence": 0.82,
     }

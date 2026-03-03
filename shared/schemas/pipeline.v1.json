@@ -2,8 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Solaris Pipeline v1",
   "type": "object",
-  "required": ["request", "outputs"],
+  "required": ["run_id", "request", "outputs", "evidence_pack"],
   "properties": {
+    "run_id": { "type": "string" },
     "request": {
       "type": "object",
       "required": ["request_id", "lat", "lon", "horizon_days"],
@@ -18,32 +19,65 @@
     },
     "outputs": {
       "type": "object",
+      "required": [
+        "feature_context",
+        "demand_forecast",
+        "scenario_set",
+        "optimization_result",
+        "quality"
+      ],
       "properties": {
+        "feature_context": {
+          "type": "object",
+          "required": ["status", "confidence", "assumptions", "quality_flags", "run_id"]
+        },
         "demand_forecast": {
           "type": "object",
+          "required": ["kwh_per_day", "lower_ci", "upper_ci"],
           "properties": {
             "kwh_per_day": { "type": "number" },
             "lower_ci": { "type": "number" },
             "upper_ci": { "type": "number" }
           }
         },
-        "recommendation": {
+        "scenario_set": {
           "type": "object",
+          "required": ["primary"],
           "properties": {
-            "pv_kw": { "type": "number" },
-            "battery_kwh": { "type": "number" },
-            "solar_kits": { "type": "integer", "minimum": 0 }
+            "primary": {
+              "type": "object",
+              "required": ["pv_kw", "battery_kwh", "solar_kits"],
+              "properties": {
+                "pv_kw": { "type": "number" },
+                "battery_kwh": { "type": "number" },
+                "solar_kits": { "type": "integer", "minimum": 0 }
+              }
+            }
+          }
+        },
+        "optimization_result": {
+          "type": "object",
+          "required": ["top_plan_id", "priority_score", "estimated_efficiency_gain_pct"],
+          "properties": {
+            "top_plan_id": { "type": "string" },
+            "priority_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "estimated_efficiency_gain_pct": { "type": "number" }
           }
         },
         "quality": {
           "type": "object",
+          "required": ["status", "confidence", "fallback_used"],
           "properties": {
-            "eo_quality": { "type": "number", "minimum": 0, "maximum": 1 },
+            "status": { "type": "string", "enum": ["ok", "degraded", "failed"] },
             "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
             "fallback_used": { "type": "boolean" }
           }
         }
       }
+    },
+    "evidence_pack": {
+      "type": "object",
+      "required": ["status", "confidence", "assumptions", "quality_flags", "run_id", "summary"]
     }
   }
 }
