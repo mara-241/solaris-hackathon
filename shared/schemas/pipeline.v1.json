@@ -25,6 +25,7 @@
         "scenario_set",
         "optimization_result",
         "impact_metrics",
+        "provenance",
         "quality"
       ],
       "properties": {
@@ -69,8 +70,10 @@
           "type": "object",
           "properties": {
             "strategy": { "type": "string" },
+            "model_input_version": { "type": "string" },
             "nn_used": { "type": "boolean" },
             "nn_status": { "type": "string" },
+            "nn_model": { "type": ["string", "null"] },
             "nn_fallback_reason": { "type": ["string", "null"] }
           }
         },
@@ -97,6 +100,15 @@
             "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 },
             "confidence_band": { "type": "string", "enum": ["low", "medium", "high"] },
             "assumptions": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["weather_source", "demographics_source", "imagery_provider"],
+          "properties": {
+            "weather_source": { "type": ["string", "null"] },
+            "demographics_source": { "type": ["string", "null"] },
+            "imagery_provider": { "type": ["string", "null"] }
           }
         },
         "quality": {
