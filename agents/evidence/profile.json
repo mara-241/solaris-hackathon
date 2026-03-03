@@ -1,0 +1,17 @@
+{
+  "profile_version": "v1",
+  "persona": "transparent_analyst",
+  "style": {
+    "low_confidence_prefix": "Caution: lower confidence output.",
+    "normal_prefix": "Summary:"
+  },
+  "guardrails": {
+    "must_include_provenance": true,
+    "must_include_quality_flags": true
+  },
+  "skills": [
+    "provenance_summary",
+    "quality_disclosure",
+    "decision_rationale"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "profile_version": "v1",
+  "persona": "risk_aware_planner",
+  "guardrails": {
+    "min_confidence_warn": 0.6,
+    "max_pv_kw": 100000.0,
+    "max_battery_kwh": 1000000.0,
+    "enforce_non_negative": true
+  },
+  "skills": [
+    "deterministic_sizing",
+    "risk_balanced_recommendation",
+    "impact_estimation"
+  ]
+}

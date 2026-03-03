@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 from agents.energy_optimization.impact import compute_impact_metrics
+from shared.agent_profiles import load_agent_profile
 
 DEFAULT_PV_DERATE = 0.8
 DEFAULT_MIN_SUN_HOURS = 2.5
@@ -11,6 +12,18 @@ DEFAULT_BATTERY_AUTONOMY_DAYS = 0.8
 DEFAULT_BATTERY_DOD = 0.85
 DEFAULT_BATTERY_ROUNDTRIP_EFF = 0.9
 DEFAULT_KIT_KWH_PER_DAY = 1.2
+
+DEFAULT_PROFILE = {
+    "profile_version": "v1",
+    "persona": "risk_aware_planner",
+    "guardrails": {
+        "min_confidence_warn": 0.6,
+        "max_pv_kw": 100000.0,
+        "max_battery_kwh": 1000000.0,
+        "enforce_non_negative": True,
+    },
+    "skills": ["deterministic_sizing"],
+}
 
 
 def _env_float(name: str, default: float) -> float:
@@ -37,6 +50,9 @@ def _model_metadata() -> dict:
 
 
 def optimize_energy_plan(feature_context: dict) -> dict:
+    profile = load_agent_profile("energy_optimization", DEFAULT_PROFILE)
+    profile_guardrails = profile.get("guardrails", {})
+
     perception = feature_context.get("perception", {})
     spatial = feature_context.get("spatial", {})
 
@@ -75,8 +91,27 @@ def optimize_energy_plan(feature_context: dict) -> dict:
     kit_kwh_per_day = max(0.1, _env_float("SOLAR_KIT_KWH_PER_DAY", DEFAULT_KIT_KWH_PER_DAY))
     solar_kits = int(max(0, demand_kwh // kit_kwh_per_day))
 
+    # Agent-specific local guardrails
+    quality_flags = ["nn_deferred_vlm_first"]
+    if bool(profile_guardrails.get("enforce_non_negative", True)):
+        pv_kw = max(0.0, pv_kw)
+        battery_kwh = max(0.0, battery_kwh)
+        solar_kits = max(0, solar_kits)
+
+    max_pv_kw = float(profile_guardrails.get("max_pv_kw", 100000.0))
+    max_battery_kwh = float(profile_guardrails.get("max_battery_kwh", 1000000.0))
+    if pv_kw > max_pv_kw:
+        pv_kw = max_pv_kw
+        quality_flags.append("optimization_guardrail_pv_capped")
+    if battery_kwh > max_battery_kwh:
+        battery_kwh = max_battery_kwh
+        quality_flags.append("optimization_guardrail_battery_capped")
+
     portfolio_priority = round(min(1.0, 0.4 + rain_risk * 0.4), 2)
     confidence = round((perception.get("confidence", 0.6) + spatial.get("confidence", 0.6)) / 2, 2)
+    min_conf_warn = float(profile_guardrails.get("min_confidence_warn", 0.6))
+    if confidence < min_conf_warn:
+        quality_flags.append("optimization_low_confidence")
 
     impact = compute_impact_metrics(
         demand_kwh=demand_kwh,
@@ -93,9 +128,15 @@ def optimize_energy_plan(feature_context: dict) -> dict:
             "PV sizing uses location sun-hours and derate losses.",
             "Battery sizing uses autonomy target, DoD, and roundtrip efficiency.",
         ],
-        "quality_flags": ["nn_deferred_vlm_first"],
+        "quality_flags": quality_flags,
         "model_metadata": {
             **_model_metadata(),
+            "agent_profile": {
+                "agent": "energy_optimization",
+                "profile_version": profile.get("profile_version", "v1"),
+                "persona": profile.get("persona", "risk_aware_planner"),
+                "skills": profile.get("skills", []),
+            },
             "sizing_parameters": {
                 "effective_sun_hours": effective_sun_hours,
                 "pv_derate_factor": pv_derate,
