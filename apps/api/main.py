@@ -59,7 +59,8 @@ def run_by_id(run_id: str, x_api_key: str | None = Header(default=None)):
 
 
 @app.get("/run/{run_id}/quality")
-def run_quality(run_id: str):
+def run_quality(run_id: str, x_api_key: str | None = Header(default=None)):
+    _require_auth(x_api_key)
     item = store.get_run(run_id)
     if not item:
         raise HTTPException(status_code=404, detail="run not found")
