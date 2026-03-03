@@ -29,7 +29,7 @@ def build_evidence_pack(request: dict, feature_context: dict, optimization: dict
             },
             "spatial_sources": {
                 "overpass": "overpass-api.de",
-                "planetary_computer": "planetary-computer" if feature_context.get("spatial", {}).get("feature_summaries", {}).get("sentinel_scene_count") is not None else None,
+                "planetary_computer": feature_context.get("spatial", {}).get("feature_summaries", {}).get("sentinel_scene_count") is not None,
             },
         },
         "artifacts": {

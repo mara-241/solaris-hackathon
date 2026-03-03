@@ -25,6 +25,7 @@
         "scenario_set",
         "optimization_result",
         "impact_metrics",
+        "provenance",
         "quality"
       ],
       "properties": {
@@ -97,6 +98,15 @@
             "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 },
             "confidence_band": { "type": "string", "enum": ["low", "medium", "high"] },
             "assumptions": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["weather_source", "demographics_source", "imagery_provider"],
+          "properties": {
+            "weather_source": { "type": ["string", "null"] },
+            "demographics_source": { "type": ["string", "null"] },
+            "imagery_provider": { "type": ["string", "null"] }
           }
         },
         "quality": {

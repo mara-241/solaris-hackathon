@@ -129,6 +129,7 @@ def run_pipeline(request: dict) -> dict:
         "optimization_result": optimization["optimization_result"],
         "model_metadata": optimization.get("model_metadata", {}),
         "impact_metrics": optimization.get("impact_metrics", {}),
+        "provenance": evidence.get("provenance", {}),
         "quality": {
             "status": opt_status,
             "confidence": optimization.get("confidence", 0.5),

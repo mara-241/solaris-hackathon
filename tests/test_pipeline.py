@@ -12,6 +12,7 @@ def test_pipeline_returns_expected_sections():
     assert "optimization_result" in out["outputs"]
     assert "model_metadata" in out["outputs"]
     assert "impact_metrics" in out["outputs"]
+    assert "provenance" in out["outputs"]
     assert out["outputs"]["impact_metrics"]["confidence_band"] in {"low", "medium", "high"}
     assert out["outputs"]["quality"]["confidence"] >= 0
     assert "evidence_pack" in out
