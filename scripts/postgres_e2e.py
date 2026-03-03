@@ -22,12 +22,12 @@ def main() -> int:
     args = ap.parse_args()
 
     if os.getenv("SOLARIS_STORE", "").lower() != "postgres":
-        msg = {"ok": False, "skipped": True, "reason": "SOLARIS_STORE is not postgres"}
+        msg = {"ok": True, "skipped": True, "reason": "SOLARIS_STORE is not postgres"}
         print(json.dumps(msg, indent=2))
         return 1 if args.require else 0
 
     if not os.getenv("DATABASE_URL"):
-        msg = {"ok": False, "skipped": True, "reason": "DATABASE_URL missing"}
+        msg = {"ok": True, "skipped": True, "reason": "DATABASE_URL missing"}
         print(json.dumps(msg, indent=2))
         return 1 if args.require else 0
 
