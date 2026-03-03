@@ -13,24 +13,12 @@ def main() -> int:
     ap.add_argument("--max-rmse", type=float, default=140.0)
     args = ap.parse_args()
 
-    p = Path(args.metrics)
-    if not p.exists():
-        print(json.dumps({"ok": False, "reason": "metrics_missing"}, indent=2))
-        return 1
+    m = json.loads(Path(args.metrics).read_text())
+    mae = float(m.get("mae", 1e9))
+    rmse = float(m.get("rmse", 1e9))
 
-    m = json.loads(p.read_text())
-    ok = m.get("mae", 1e9) <= args.max_mae and m.get("rmse", 1e9) <= args.max_rmse
-    print(
-        json.dumps(
-            {
-                "ok": ok,
-                "mae": m.get("mae"),
-                "rmse": m.get("rmse"),
-                "thresholds": {"max_mae": args.max_mae, "max_rmse": args.max_rmse},
-            },
-            indent=2,
-        )
-    )
+    ok = mae <= args.max_mae and rmse <= args.max_rmse
+    print(json.dumps({"ok": ok, "mae": mae, "rmse": rmse, "max_mae": args.max_mae, "max_rmse": args.max_rmse}, indent=2))
     return 0 if ok else 1
 
 
