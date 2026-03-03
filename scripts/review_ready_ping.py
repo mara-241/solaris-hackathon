@@ -8,13 +8,12 @@ import urllib.parse
 import urllib.request
 
 from tasklib import find_task, load_tasks
-
-REQUIRED = ["ci", "goldenPath", "eoFallback", "codexReview", "geminiReview", "pushAuthorized"]
+from workflow_constants import REQUIRED_CHECKS
 
 
 def is_ready(task: dict) -> tuple[bool, list[str]]:
     checks = task.get("checks", {})
-    missing = [k for k in REQUIRED if checks.get(k) != "pass"]
+    missing = [k for k in REQUIRED_CHECKS if checks.get(k) != "pass"]
     return (len(missing) == 0, missing)
 
 

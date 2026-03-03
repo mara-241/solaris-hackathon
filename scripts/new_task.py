@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timezone
 
 from tasklib import load_tasks, save_tasks
+from workflow_constants import DEFAULT_CHECKS
 
 
 def now_iso() -> str:
@@ -30,14 +31,7 @@ def main() -> int:
         "status": "ready",
         "pr": "",
         "request": args.request,
-        "checks": {
-            "ci": "pending",
-            "goldenPath": "pending",
-            "eoFallback": "pending",
-            "codexReview": "pending",
-            "geminiReview": "pending",
-            "pushAuthorized": "pending",
-        },
+        "checks": DEFAULT_CHECKS.copy(),
         "notes": "",
         "createdAt": now_iso(),
     }
