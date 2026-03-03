@@ -9,30 +9,25 @@ from pathlib import Path
 from tasklib import find_task, load_tasks, save_tasks
 
 
+VALID = {"pass", "fail", "waived", "pending"}
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def map_status(v: str) -> str:
-    v = (v or "pending").lower().strip()
-    if v in {"pass", "approved", "ok"}:
-        return "pass"
-    if v in {"waived", "skip", "skipped"}:
-        return "pass"
-    if v in {"fail", "failed", "changes_requested"}:
-        return "fail"
-    return "pending"
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--id", required=True)
-    ap.add_argument("--evidence", required=True, help="Path to review evidence JSON")
+    ap.add_argument("--file", required=True, help="Path to JSON evidence")
     args = ap.parse_args()
 
-    ev = json.loads(Path(args.evidence).read_text())
-    codex = map_status(ev.get("codex"))
-    gemini = map_status(ev.get("gemini"))
+    payload = json.loads(Path(args.file).read_text())
+    codex = str(payload.get("codex", "pending")).lower()
+    gemini = str(payload.get("gemini", "pending")).lower()
+
+    if codex not in VALID or gemini not in VALID:
+        raise SystemExit("evidence must include codex/gemini in {pass,fail,waived,pending}")
 
     doc = load_tasks()
     task = find_task(doc, args.id)
@@ -40,14 +35,17 @@ def main() -> int:
         raise SystemExit(f"task not found: {args.id}")
 
     checks = task.setdefault("checks", {})
-    checks["codexReview"] = codex
-    checks["geminiReview"] = gemini
+    checks["codexReview"] = "pass" if codex == "waived" else codex
+    checks["geminiReview"] = "pass" if gemini == "waived" else gemini
 
-    note = f"[{now_iso()}] review_evidence codex={codex} gemini={gemini} source={args.evidence}"
-    task["notes"] = (task.get("notes", "") + "\n" + note).strip()
+    line = f"[{now_iso()}] review_evidence codex={codex} gemini={gemini}"
+    if payload.get("notes"):
+        line += f" notes={payload['notes']}"
+    task["notes"] = (task.get("notes", "") + "\n" + line).strip()
+
     doc["updatedAt"] = now_iso()
     save_tasks(doc)
-    print(f"review evidence applied for {args.id}")
+    print(f"review evidence applied to {args.id}")
     return 0
 
 
