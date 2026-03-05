@@ -31,7 +31,7 @@ app = FastAPI(title="Solaris API", version="0.4.2", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -155,6 +155,67 @@ def openclaw_execute(
         return run(internal_req, x_api_key=x_api_key)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Pipeline execution failed: {exc}")
+
+class ChatRequest(BaseModel):
+    """Request for the chat-based LangGraph OpenClaw agent."""
+    message: str
+    lat: float | None = None
+    lon: float | None = None
+    households: int | None = None
+    horizon_days: int = 30
+    usage_profile: str | None = None
+    thread_id: str | None = None
+
+
+@app.post("/api/chat")
+def chat_agent(
+    req: ChatRequest,
+    x_api_key: str | None = Header(default=None),
+):
+    """
+    Execute the OpenClaw LangGraph agent via a chat interface.
+    """
+    _require_auth(x_api_key)
+    from agents.langgraph.graph import run_solaris_graph
+    import uuid
+    from langchain_core.messages import AIMessage
+
+    try:
+        final_state = run_solaris_graph(
+            message=req.message,
+            lat=req.lat or 0.0,
+            lon=req.lon or 0.0,
+            households=req.households,
+            horizon_days=req.horizon_days,
+            thread_id=req.thread_id or str(uuid.uuid4()),
+            usage_profile=req.usage_profile,
+        )
+        
+        # Format the response exactly as LangGraph's API would for the frontend UI
+        content = final_state.get("response", "Analysis complete.")
+        
+        # If the LLM successfully generated an energy plan, append a summary to the chat response
+        energy_plan = final_state.get("energy_plan")
+        if energy_plan and "demand_forecast" in energy_plan:
+            content += f"\n\n**Energy Plan Summary:**\n"
+            content += f"- **Daily Demand**: {energy_plan['demand_forecast']['kwh_per_day']} kWh\n"
+            if "scenario_set" in energy_plan and "primary" in energy_plan["scenario_set"]:
+                primary = energy_plan["scenario_set"]["primary"]
+                content += f"- **Recommended PV**: {primary.get('pv_kw')} kW\n"
+                content += f"- **Recommended Battery**: {primary.get('battery_kwh')} kWh\n"
+        
+        return {
+            "status": "completed",
+            "messages": [
+                {
+                    "type": "ai",
+                    "content": content
+                }
+            ],
+            "details": final_state
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Agent execution failed: {exc}")
 
 
 # ── Frontend Dashboard Endpoints ──────────────────────────────────────────
@@ -356,15 +417,19 @@ def satellite_search(req: SatelliteSearchRequest, x_api_key: str | None = Header
 
 @app.get("/api/geocode")
 def geocode(q: str):
-    """Geocode a location name to lat/lon using Nominatim."""
-    import urllib.request, json as _json
-    url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(q)}&format=json&limit=5"
-    req_obj = urllib.request.Request(url, headers={"User-Agent": "Solaris-Hackathon/1.0"})
-    with urllib.request.urlopen(req_obj, timeout=10) as resp:
-        results = _json.loads(resp.read().decode())
+    """Geocode a location name to lat/lon using Geopy and Nominatim."""
+    from geopy.geocoders import Nominatim
+    geolocator = Nominatim(user_agent="solaris_ai_agent")
+    
+    # We can request multiple results by passing exactly_one=False (or limit)
+    locations = geolocator.geocode(q, exactly_one=False, limit=5)
+    
+    if not locations:
+        return []
+
     return [
-        {"name": r.get("display_name", ""), "lat": float(r["lat"]), "lon": float(r["lon"])}
-        for r in results if "lat" in r and "lon" in r
+        {"name": loc.address, "lat": loc.latitude, "lon": loc.longitude}
+        for loc in locations
     ]
 
 

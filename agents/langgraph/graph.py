@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 # Uses Qwen 3.5 via any OpenAI-compatible endpoint (DashScope, Ollama, etc.)
 # Configure via environment variables.
 
+from dotenv import load_dotenv
+load_dotenv()
+
 _DEFAULT_MODEL = os.getenv("SOLARIS_LLM_MODEL", "qwen3.5")
 _DEFAULT_BASE_URL = os.getenv(
     "SOLARIS_LLM_BASE_URL",
@@ -84,7 +87,23 @@ def supervisor_node(state: AgentState) -> dict:
     to call next, or whether we are done.
     """
     llm = _get_llm()
-    llm_with_tools = llm.bind_tools(ALL_TOOLS)
+    plan = state.get("plan", [])
+    
+    # Selectively bind tools: only expose pipeline tools if they are in the plan
+    from agents.langgraph.tools import (
+        run_energy_analysis, perception_data, spatial_analysis, 
+        satellite_imagery, energy_optimization, evidence_pack,
+        geocode_location, search_stored_plans
+    )
+    
+    available_tools = [run_energy_analysis, geocode_location, search_stored_plans]
+    if "perception_data" in plan: available_tools.append(perception_data)
+    if "spatial_analysis" in plan: available_tools.append(spatial_analysis)
+    if "satellite_imagery" in plan: available_tools.append(satellite_imagery)
+    if "energy_optimization" in plan: available_tools.append(energy_optimization)
+    if "evidence_pack" in plan: available_tools.append(evidence_pack)
+        
+    llm_with_tools = llm.bind_tools(available_tools)
 
     messages = state.get("messages", [])
     logger.info("--- SUPERVISOR STARTING ---")
@@ -112,7 +131,8 @@ def supervisor_node(state: AgentState) -> dict:
 def _build_context_message(state: AgentState) -> str:
     """Build a summary of current state for the LLM."""
     parts = [
-        f"**Request**: {json.dumps(state.get('request', {}), default=str)}",
+        f"**System Note**: The 'Request Parameters' block below may contain default or previous query values. DO NOT trigger an energy analysis unless the user explicitly asks for it in their current message.",
+        f"**Request Parameters**: {json.dumps(state.get('request', {}), default=str)}",
         f"**Plan**: {state.get('plan', [])}",
         f"**Completed steps**: {state.get('completed_steps', [])}",
         f"**Errors**: {state.get('errors', [])}",
@@ -145,10 +165,18 @@ def _build_context_message(state: AgentState) -> str:
             f"\n**Next step**: Call the `{remaining[0]}` tool. "
             f"Pass this JSON as input: {_build_tool_input(remaining[0], state)}"
         )
-    else:
+    elif plan:
         parts.append(
             "\n**All steps complete**. Synthesise the final energy-needs "
             "report from the accumulated results."
+        )
+    else:
+        parts.append(
+            "\n**Instructions**: Determine what the user wants. "
+            "If they are just chatting or answering a question, respond conversationally and do NOT call any tools. "
+            "If they expressly ask to run an energy analysis, forecast demand, or size a system, call `run_energy_analysis`. "
+            "If they ask for existing plans, call `search_stored_plans`. "
+            "NEVER call `perception_data`, `spatial_analysis`, `satellite_imagery`, `energy_optimization`, or `evidence_pack` individually without calling `run_energy_analysis` first."
         )
 
     return "\n".join(parts)
@@ -169,7 +197,7 @@ def _build_tool_input(tool_name: str, state: AgentState) -> str:
             "lon": request.get("lon"),
             "date_offset": retries * 90,
         }, default=str)
-    elif tool_name in ["energy_optimization", "evidence_pack"]:
+    elif tool_name in ["energy_optimization", "evidence_pack", "run_energy_analysis"]:
         # The LLM now just passes down the original request arguments
         return json.dumps(request, default=str)
     else:
@@ -217,12 +245,28 @@ def process_tool_result(state: AgentState) -> dict:
         req = tool_result.get("request", {})
         
         try:
-            if trigger == "energy_optimization":
+            if trigger == "run_energy_analysis":
+                raw_plan = state.get("plan", [])
+                plan = [str(x) for x in raw_plan] if isinstance(raw_plan, list) else []
+                pipeline = [
+                    "perception_data",
+                    "spatial_analysis",
+                    "satellite_imagery",
+                    "energy_optimization",
+                    "evidence_pack"
+                ]
+                for step in pipeline:
+                    if step not in plan:
+                        plan.append(step)
+                updates["plan"] = plan
+                tool_result = {"status": "ok", "message": "Pipeline triggered successfully. Proceed with the newly configured plan steps."}
+            elif trigger == "energy_optimization":
                 from agents.energy_optimization.agent import optimize_energy_plan
                 tool_result = optimize_energy_plan(
-                    state.get("perception_result", {}),
-                    state.get("spatial_result", {}),
-                    req
+                    feature_context={
+                        "perception": state.get("perception_result", {}),
+                        "spatial": state.get("spatial_result", {})
+                    }
                 )
             elif trigger == "evidence_pack":
                 from agents.evidence.agent import build_evidence_pack
@@ -312,15 +356,9 @@ def after_tools(state: AgentState) -> Literal["process"]:
     return "process"
 
 
-def after_process(state: AgentState) -> Literal["supervisor", "end"]:
-    """After processing, go back to supervisor if there's more to do."""
-    plan = state.get("plan", [])
-    completed = state.get("completed_steps", [])
-    remaining = [s for s in plan if s not in completed]
-
-    if remaining:
-        return "supervisor"
-    return "end"
+def after_process(state: AgentState) -> Literal["supervisor"]:
+    """After processing, go back to supervisor to decide next steps or synthesize."""
+    return "supervisor"
 
 
 # ── Graph builder ────────────────────────────────────────────────────────────
@@ -442,13 +480,7 @@ def run_solaris_graph(
         "satellite_result": None,
         "energy_result": None,
         "evidence_result": None,
-        "plan": [
-            "perception_data",
-            "spatial_analysis",
-            "satellite_imagery",
-            "energy_optimization",
-            "evidence_pack",
-        ],
+        "plan": [],
         "replan_reason": None,
         "completed_steps": [],
         "errors": [],

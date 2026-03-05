@@ -38,17 +38,30 @@ def _safe_json(obj: object) -> str:
         return json.dumps({"raw": str(obj)})
 
 
+# ── Tool: run_energy_analysis ───────────────────────────────────────────────
+
+@tool
+def run_energy_analysis(location_name: str) -> str:
+    """
+    Starts the main energy analysis pipeline for a specified location (e.g., 'Nairobi', 'Tokyo').
+    Call this tool ONLY when the user explicitly asks to generate an energy plan, forecast demand, or size a system for a specific place.
+    DO NOT call this tool for conversational queries (e.g., 'hello', 'how are you') or if no specific location is requested.
+    """
+    return _safe_json({"__trigger__": "run_energy_analysis"})
+
+
+
 # ── Tool: perception_data ───────────────────────────────────────────────────
 
 @tool
-def perception_data(request_json: str) -> str:
+def perception_data(request: str | dict) -> str:
     """
     Gather environmental and demographic data for a location.
 
     Input
     -----
-    request_json : str
-        JSON string with at least ``lat``, ``lon``, and optional
+    request : str | dict
+        JSON string or dict with at least ``lat``, ``lon``, and optional
         ``horizon_days``, ``households``.
 
     Returns
@@ -57,8 +70,8 @@ def perception_data(request_json: str) -> str:
         JSON string with weather, demographics, seismic and flood signals.
     """
     try:
-        request = json.loads(request_json)
-        result = read_and_analyze_data(request)
+        req = json.loads(request) if isinstance(request, str) else request
+        result = read_and_analyze_data(req)
         return _safe_json(result)
     except Exception as exc:
         logger.exception("perception_data tool failed")
@@ -68,14 +81,14 @@ def perception_data(request_json: str) -> str:
 # ── Tool: spatial_analysis ──────────────────────────────────────────────────
 
 @tool
-def spatial_analysis(request_json: str) -> str:
+def spatial_analysis(request: str | dict) -> str:
     """
     Analyse spatial context (buildings, NDVI proxy, settlement density).
 
     Input
     -----
-    request_json : str
-        JSON string with at least ``lat``, ``lon``.
+    request : str | dict
+        JSON string or dict with at least ``lat``, ``lon``.
 
     Returns
     -------
@@ -83,8 +96,8 @@ def spatial_analysis(request_json: str) -> str:
         JSON with NDVI proxy, roof-count estimate, settlement density, etc.
     """
     try:
-        request = json.loads(request_json)
-        result = analyze_spatial_context(request)
+        req = json.loads(request) if isinstance(request, str) else request
+        result = analyze_spatial_context(req)
         return _safe_json(result)
     except Exception as exc:
         logger.exception("spatial_analysis tool failed")
@@ -386,12 +399,109 @@ def evidence_pack(request_json: str) -> str:
         return _safe_json({"error": str(exc), "status": "failed"})
 
 
+# ── Tool: geocode_location ──────────────────────────────────────────────────
+
+@tool
+def geocode_location(request_json: str) -> str:
+    """
+    Look up the latitude and longitude for a given location name.
+
+    Input
+    -----
+    request_json : str
+        JSON string with a ``query`` key containing the name of the place.
+
+    Returns
+    -------
+    str
+        JSON array of top matching locations with their lat/lon coordinates.
+    """
+    try:
+        import urllib.request
+        import urllib.parse
+        req = json.loads(request_json)
+        query = req.get("query", "")
+        if not query:
+            return _safe_json({"error": "No query provided", "status": "failed"})
+            
+        url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(query)}&format=json&limit=5"
+        req_obj = urllib.request.Request(url, headers={"User-Agent": "Solaris-Agent/1.0"})
+        with urllib.request.urlopen(req_obj, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            
+        results = [
+            {"name": r.get("display_name", ""), "lat": float(r["lat"]), "lon": float(r["lon"])}
+            for r in data if "lat" in r and "lon" in r
+        ]
+        return _safe_json({"results": results, "status": "ok"})
+    except Exception as exc:
+        logger.exception("geocode_location tool failed")
+        return _safe_json({"error": str(exc), "status": "failed"})
+
+
+# ── Tool: search_stored_plans ───────────────────────────────────────────────
+
+@tool
+def search_stored_plans(request_json: str) -> str:
+    """
+    Search the database for existing energy deployment plans.
+
+    Input
+    -----
+    request_json : str
+        JSON string containing an optional ``query`` representing the location
+        name to search for, or empty to get all recent plans.
+
+    Returns
+    -------
+    str
+        JSON list of existing locations and their most recent plan metrics.
+    """
+    from apps.api.store import get_store
+    try:
+        req = json.loads(request_json)
+        query = req.get("query", "").lower()
+        
+        store = get_store()
+        locations = store.get_locations()
+        
+        results = []
+        for loc in locations:
+            if query and query not in loc["name"].lower():
+                continue
+                
+            runs = store.get_runs_for_location(loc["loc_id"])
+            if runs:
+                # Get the most recent valid run
+                latest = runs[0]
+                results.append({
+                    "location_name": loc["name"],
+                    "lat": loc["lat"],
+                    "lon": loc["lon"],
+                    "households": loc["households"],
+                    "latest_run_confidence": latest.get("confidence")
+                })
+        
+        return _safe_json({
+            "status": "ok",
+            "matches": results,
+            "total_matches": len(results)
+        })
+    except Exception as exc:
+        logger.exception("search_stored_plans tool failed")
+        return _safe_json({"error": str(exc), "status": "failed"})
+
+
 # ── All tools list ──────────────────────────────────────────────────────────
 
 ALL_TOOLS = [
+    run_energy_analysis,
     perception_data,
     spatial_analysis,
     satellite_imagery,
     energy_optimization,
     evidence_pack,
+    geocode_location,
+    search_stored_plans,
 ]
+
