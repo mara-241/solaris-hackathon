@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import os
 from time import perf_counter
 import traceback
 
@@ -12,6 +13,43 @@ from agents.spatial_vlm.agent import analyze_spatial_context
 
 
 MAX_PARALLEL_AGENTS = 2
+
+
+# -------------------------------------------------------------------
+# Orchestrator Routing — determine if spatial/satellite data is needed
+# -------------------------------------------------------------------
+
+_SPATIAL_KEYWORDS = {
+    "satellite", "imagery", "image", "spatial", "vegetation", "ndvi",
+    "land", "flood", "fire", "burn", "deforestation", "urban", "roof",
+    "settlement", "infrastructure", "terrain", "water", "river", "lake",
+    "forest", "crop", "agriculture", "building", "construction", "cloud",
+}
+
+
+def _requires_spatial_data(request: dict) -> bool:
+    """Evaluate whether a request needs satellite/spatial analysis.
+
+    Returns True when:
+      - The request contains valid lat/lon coordinates (primary trigger)
+      - OR the prompt/usage_profile hints at spatial analysis needs
+    """
+    lat = request.get("lat")
+    lon = request.get("lon")
+
+    # Any request with coordinates implies spatial context is useful
+    if lat is not None and lon is not None:
+        try:
+            if -90.0 <= float(lat) <= 90.0 and -180.0 <= float(lon) <= 180.0:
+                return True
+        except (TypeError, ValueError):
+            pass
+
+    # Check free-text prompt for spatial keywords
+    prompt = str(request.get("prompt", "")).lower()
+    usage = str(request.get("usage_profile", "")).lower()
+    combined = f"{prompt} {usage}"
+    return bool(_SPATIAL_KEYWORDS & set(combined.split()))
 
 
 def _utc_now_iso() -> str:
@@ -51,10 +89,27 @@ def run_pipeline(request: dict) -> dict:
     steps: list[dict] = []
     errors: list[str] = []
 
+    # ---------------------------------------------------------------
+    # Orchestrator routing: decide if spatial agent is needed
+    # ---------------------------------------------------------------
+    needs_spatial = _requires_spatial_data(request)
+
     t = perf_counter()
+    spatial_default = {
+        "imagery": {"provider": "fallback", "compressed": False, "images": {}},
+        "vlm_description": "Spatial analysis not requested for this run.",
+        "feature_summaries": {
+            "ndvi_mean": 0.3,
+            "roof_count_estimate": request.get("households") or 100,
+            "settlement_density": "unknown",
+        },
+        "visual_embeddings_ref": None,
+        "fallback_used": True,
+    }
+
     with ThreadPoolExecutor(max_workers=MAX_PARALLEL_AGENTS) as ex:
         perception_f = ex.submit(read_and_analyze_data, request)
-        spatial_f = ex.submit(analyze_spatial_context, request)
+        spatial_f = ex.submit(analyze_spatial_context, request) if needs_spatial else None
 
         perception, p_err = _safe_future_result(
             perception_f,
@@ -68,41 +123,49 @@ def run_pipeline(request: dict) -> dict:
             },
             error_flag="perception_error",
         )
-        spatial, s_err = _safe_future_result(
-            spatial_f,
-            default_payload={
-                "imagery": {"provider": "fallback", "compressed": False},
-                "feature_summaries": {
-                    "ndvi_mean": 0.3,
-                    "roof_count_estimate": request.get("households") or 100,
-                    "settlement_density": "unknown",
-                },
-                "visual_embeddings_ref": None,
-                "fallback_used": True,
-            },
-            error_flag="spatial_error",
-        )
+
+        if spatial_f is not None:
+            spatial, s_err = _safe_future_result(
+                spatial_f,
+                default_payload=spatial_default,
+                error_flag="spatial_error",
+            )
+        else:
+            spatial = {"status": "skipped", "confidence": 0.5, **spatial_default}
+            s_err = None
 
     if p_err:
         errors.append(p_err)
     if s_err:
         errors.append(s_err)
-    steps.append(_step_record("parallel_data_collection", t, status="degraded" if errors else "ok"))
+    steps.append(_step_record(
+        "parallel_data_collection", t,
+        status="degraded" if errors else "ok",
+        extra={"spatial_requested": needs_spatial},
+    ))
 
     t = perf_counter()
     quality_flags = [*(perception.get("quality_flags") or []), *(spatial.get("quality_flags") or [])]
     feature_status = "degraded" if errors else "ok"
+
+    # Build enriched feature context with VLM description from spatial agent
+    spatial_assumptions = ["Spatial features are estimated from available imagery."]
+    if spatial.get("vlm_description") and spatial.get("vlm_description") != "Spatial analysis not requested for this run.":
+        spatial_assumptions = ["Spatial analysis includes VLM-generated qualitative description."]
+
     feature_context = {
         "status": feature_status,
         "confidence": round((perception.get("confidence", 0.5) + spatial.get("confidence", 0.5)) / 2, 2),
         "assumptions": [
             "Weather and demographic adapters are baseline-quality.",
-            "Spatial features are estimated from available imagery.",
+            *spatial_assumptions,
         ],
         "quality_flags": quality_flags,
         "run_id": run_id,
         "perception": perception,
         "spatial": spatial,
+        # Surface VLM description at top level for easy downstream access
+        "vlm_description": spatial.get("vlm_description"),
     }
     steps.append(_step_record("build_feature_context", t, status=feature_status))
 

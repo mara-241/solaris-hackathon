@@ -4,3 +4,9 @@ pytest
 psycopg[binary]
 defusedxml
 ruff
+jsonschema
+numpy
+Pillow
+rasterio
+pystac-client
+planetary-computer
