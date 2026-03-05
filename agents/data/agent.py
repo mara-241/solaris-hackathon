@@ -5,5 +5,5 @@ def collect_data(request: dict) -> dict:
     return {
         "households": households,
         "usage_profile": usage_profile,
-        "weather_summary": {"rain_risk": 0.3, "sun_hours": 5.2},
+        "weather_summary": {"rain_risk": None, "sun_hours": None, "error": "Data agent weather integration not yet implemented."},
     }

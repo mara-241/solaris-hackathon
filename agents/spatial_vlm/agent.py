@@ -420,17 +420,31 @@ def analyze_spatial_context(request: dict) -> dict:
 
     if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
         return {
-            "status": "degraded",
-            "confidence": 0.35,
-            "assumptions": ["Invalid coordinates; using fallback priors."],
-            "quality_flags": ["invalid_coordinates", "spatial_imagery_fallback"],
-            "imagery": {"provider": "fallback"},
+            "status": "failed",
+            "confidence": 0.0,
+            "assumptions": ["Invalid coordinates provided. Unable to fetch satellite data."],
+            "quality_flags": ["invalid_coordinates", "spatial_data_unavailable"],
+            "imagery": {"provider": None},
             "feature_summaries": {
-                "ndvi_mean": 0.35,
-                "roof_count_estimate": request.get("households") or 100,
-                "settlement_density": "unknown",
+                "ndvi_mean": None,
+                "ndvi_vegetation_pct": None,
+                "ndvi_urban_pct": None,
+                "ndwi_mean": None,
+                "water_coverage_pct": None,
+                "roof_count_estimate": None,
+                "settlement_density": None,
+                "scl_quality": None,
+                "ndvi_change": None,
+                "ndvi_image": None,
+                "ndwi_image": None,
+                "scene_date": None,
+                "preview_url": None,
+                "sentinel_scene_count": 0,
+                "land_cover_summary": [],
+                "error": "Invalid coordinates",
             },
-            "fallback_used": True,
+            "fallback_used": False,
+            "data_unavailable": True,
         }
 
     # ── Run full Sentinel-2 analysis ──────────────────────────────────────────
@@ -468,12 +482,17 @@ def analyze_spatial_context(request: dict) -> dict:
         "ndwi_image": s2.get("ndwi_image"),
     }
 
+    # ── When Sentinel-2 data is unavailable, leave values as None ──
+    if feature_summaries["ndvi_mean"] is None:
+        flags.append("satellite_data_unavailable")
+        feature_summaries["error"] = "Unable to fetch Sentinel-2 satellite data for this location."
+
     # ── Derive human-readable land cover interpretation ───────────────────────
-    ndvi = s2.get("ndvi_mean")
-    ndwi = s2.get("ndwi_mean")
-    veg_pct = s2.get("ndvi_vegetation_pct", 0) or 0
-    water_pct = s2.get("water_coverage_pct", 0) or 0
-    ndvi_change = s2.get("ndvi_change") or {}
+    ndvi = feature_summaries.get("ndvi_mean")
+    ndwi = feature_summaries.get("ndwi_mean")
+    veg_pct = feature_summaries.get("ndvi_vegetation_pct", 0) or 0
+    water_pct = feature_summaries.get("water_coverage_pct", 0) or 0
+    ndvi_change = feature_summaries.get("ndvi_change") or {}
 
     land_cover_summary = []
     if veg_pct > 40:

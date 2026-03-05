@@ -157,8 +157,10 @@ def run_pipeline(request: dict) -> dict:
         perception, p_err = _safe_future_result(
             perception_f,
             default_payload={
-                "weather": {"source": "fallback", "rain_risk": 0.35, "sun_hours": 4.5},
-                "demographics": {"source": "fallback", "households": request.get("households") or 100},
+                "status": "failed",
+                "confidence": 0.0,
+                "weather": {"source": None, "rain_risk": None, "sun_hours": None, "error": "Perception agent failed. Unable to fetch weather data."},
+                "demographics": {"source": None, "households": request.get("households") or 100, "error": "Perception agent failed. Unable to fetch demographics."},
                 "baselines": {
                     "usage_profile": request.get("usage_profile") or "mixed",
                     "daily_baseline_kwh": (request.get("households") or 100) * 1.4,
@@ -169,14 +171,30 @@ def run_pipeline(request: dict) -> dict:
         spatial, s_err = _safe_future_result(
             spatial_f,
             default_payload={
-                "imagery": {"provider": "fallback", "compressed": False},
+                "status": "failed",
+                "confidence": 0.0,
+                "imagery": {"provider": None},
                 "feature_summaries": {
-                    "ndvi_mean": 0.3,
-                    "roof_count_estimate": request.get("households") or 100,
-                    "settlement_density": "unknown",
+                    "ndvi_mean": None,
+                    "ndvi_vegetation_pct": None,
+                    "ndvi_urban_pct": None,
+                    "ndwi_mean": None,
+                    "water_coverage_pct": None,
+                    "roof_count_estimate": None,
+                    "settlement_density": None,
+                    "scl_quality": None,
+                    "ndvi_change": None,
+                    "ndvi_image": None,
+                    "ndwi_image": None,
+                    "scene_date": None,
+                    "preview_url": None,
+                    "sentinel_scene_count": 0,
+                    "land_cover_summary": [],
+                    "error": "Spatial agent failed. Unable to fetch satellite data.",
                 },
                 "visual_embeddings_ref": None,
-                "fallback_used": True,
+                "fallback_used": False,
+                "data_unavailable": True,
             },
             error_flag="spatial_error",
         )

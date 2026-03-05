@@ -10,16 +10,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@types/mapbox-gl": "^3.4.1",
-    "@types/react-map-gl": "^6.1.8",
     "clsx": "^2.1.1",
     "framer-motion": "^12.35.0",
     "lucide-react": "^0.577.0",
-    "mapbox-gl": "^3.19.1",
+    "maplibre-gl": "^4.7.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-map-gl": "^7.1.6",
     "react-router-dom": "^7.13.1",
+    "recharts": "^3.7.0",
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {

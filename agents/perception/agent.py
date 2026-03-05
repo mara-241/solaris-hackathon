@@ -47,8 +47,8 @@ def _fetch_weather(lat: float, lon: float) -> tuple[dict, list[str]]:
             flags.append("weather_stale_cache")
         return {"source": "open-meteo", "rain_risk": rain_risk, "sun_hours": sun_hours}, flags
     except (CacheFetchError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
-        flags.append("weather_fallback")
-        return {"source": "fallback", "rain_risk": 0.3, "sun_hours": 5.0}, flags
+        flags.append("weather_unavailable")
+        return {"source": None, "rain_risk": None, "sun_hours": None, "error": "Unable to fetch weather data from Open-Meteo."}, flags
 
 
 def _reverse_country_code(lat: float, lon: float) -> str | None:
@@ -64,8 +64,8 @@ def _fetch_demographics(lat: float, lon: float, households: int) -> tuple[dict, 
     flags: list[str] = []
     code = _reverse_country_code(lat, lon)
     if not code:
-        flags.append("demographics_fallback")
-        return {"source": "fallback", "households": households, "country_code": None}, flags
+        flags.append("demographics_unavailable")
+        return {"source": None, "households": households, "country_code": None, "error": "Unable to determine country code via reverse geocoding."}, flags
 
     try:
         url = f"https://api.worldbank.org/v2/country/{code}/indicator/SP.POP.TOTL?format=json"
@@ -84,8 +84,8 @@ def _fetch_demographics(lat: float, lon: float, households: int) -> tuple[dict, 
             "households": households,
         }, flags
     except (CacheFetchError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, TypeError):
-        flags.append("demographics_fallback")
-        return {"source": "fallback", "country_code": code, "households": households}, flags
+        flags.append("demographics_unavailable")
+        return {"source": None, "country_code": code, "households": households, "error": "Unable to fetch demographics from World Bank API."}, flags
 
 
 def _fetch_usgs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
@@ -106,7 +106,7 @@ def _fetch_usgs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
         return {"source": "usgs", "events_4p5_plus_lookback": count}, flags
     except (CacheFetchError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
         flags.append("usgs_signal_unavailable")
-        return {"source": "fallback", "events_4p5_plus_lookback": 0}, flags
+        return {"source": None, "events_4p5_plus_lookback": None, "error": "Unable to fetch seismic data from USGS."}, flags
 
 
 def _fetch_gdacs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
@@ -139,7 +139,7 @@ def _fetch_gdacs_signal(lat: float, lon: float) -> tuple[dict, list[str]]:
         UnicodeDecodeError,
     ):
         flags.append("gdacs_signal_unavailable")
-        return {"source": "fallback", "nearby_alerts_500km": 0}, flags
+        return {"source": None, "nearby_alerts_500km": None, "error": "Unable to fetch disaster alerts from GDACS."}, flags
 
 
 def read_and_analyze_data(request: dict) -> dict:

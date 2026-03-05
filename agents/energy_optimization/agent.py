@@ -59,8 +59,10 @@ def optimize_energy_plan(feature_context: dict) -> dict:
     feature_summaries = spatial.get("feature_summaries", {})
 
     baseline = perception.get("baselines", {}).get("daily_baseline_kwh", 120)
-    sun_hours = float(perception.get("weather", {}).get("sun_hours", 4.5))
-    rain_risk = float(perception.get("weather", {}).get("rain_risk", 0.3))
+    _raw_sun = perception.get("weather", {}).get("sun_hours")
+    _raw_rain = perception.get("weather", {}).get("rain_risk")
+    sun_hours = float(_raw_sun) if _raw_sun is not None else 4.5
+    rain_risk = float(_raw_rain) if _raw_rain is not None else 0.3
 
     raw_households = perception.get("demographics", {}).get("households", 100)
     try:

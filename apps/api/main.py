@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
 import os
+import urllib.parse
 
 # Configure logging
 logging.basicConfig(
@@ -191,7 +192,7 @@ def list_locations(x_api_key: str | None = Header(default=None)):
 
 @app.get("/api/locations/{loc_id}")
 def get_location(loc_id: str, x_api_key: str | None = Header(default=None)):
-    """Get a specific location's actionable energy plan."""
+    """Get a specific location's full analysis data including all pipeline outputs."""
     _require_auth(x_api_key)
     locs = store.get_locations()
     loc = next((l for l in locs if l["loc_id"] == loc_id), None)
@@ -241,7 +242,9 @@ def get_location_satellite(loc_id: str, x_api_key: str | None = Header(default=N
         raise HTTPException(status_code=404, detail="run not found")
 
     outputs = run_data.get("outputs", {})
-    spatial = outputs.get("spatial", {})
+    # spatial lives inside feature_context in the pipeline output
+    feature_context = outputs.get("feature_context", {})
+    spatial = feature_context.get("spatial", {}) or outputs.get("spatial", {})
     feature_summaries = spatial.get("feature_summaries", {})
     optimization = outputs.get("optimization_result", {})
     spatial_insights = outputs.get("spatial_insights") or optimization.get("spatial_insights") or {}
@@ -263,4 +266,110 @@ def get_location_satellite(loc_id: str, x_api_key: str | None = Header(default=N
         "sentinel_scene_count": feature_summaries.get("sentinel_scene_count", 0),
         "ndvi_image": feature_summaries.get("ndvi_image"),
         "ndwi_image": feature_summaries.get("ndwi_image"),
+        "error": feature_summaries.get("error"),
+        "data_unavailable": feature_summaries.get("ndvi_mean") is None,
     }
+
+
+@app.get("/api/dashboard/stats")
+def dashboard_stats(x_api_key: str | None = Header(default=None)):
+    """Aggregate dashboard stats for the overview header."""
+    _require_auth(x_api_key)
+    return store.get_dashboard_stats()
+
+
+# ── Direct Satellite Search (no pipeline, notebook-style analysis) ────────
+
+class SatelliteSearchRequest(BaseModel):
+    """Request for direct satellite analysis by coordinates."""
+    lat: float
+    lon: float
+    location_name: str = "Unknown Location"
+
+
+@app.post("/api/satellite/search")
+def satellite_search(req: SatelliteSearchRequest, x_api_key: str | None = Header(default=None)):
+    """
+    Run a direct Sentinel-2 satellite analysis for any location.
+    Returns true-color preview, NDVI/NDWI images, SCL quality,
+    change detection, and all metrics — like the getting-started notebook.
+    Does NOT run the full energy pipeline.
+    """
+    _require_auth(x_api_key)
+
+    if not (-90.0 <= req.lat <= 90.0 and -180.0 <= req.lon <= 180.0):
+        raise HTTPException(status_code=400, detail="Invalid coordinates")
+
+    from agents.spatial_vlm.agent import _sentinel2_full_analysis
+
+    try:
+        s2, flags = _sentinel2_full_analysis(req.lat, req.lon)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Satellite analysis failed: {exc}")
+
+    # Derive human-readable land cover summary
+    import numpy as np
+    veg_pct = s2.get("ndvi_vegetation_pct", 0) or 0
+    water_pct = s2.get("water_coverage_pct", 0) or 0
+    ndvi_change = s2.get("ndvi_change") or {}
+
+    land_cover_summary = []
+    if veg_pct > 40:
+        land_cover_summary.append(f"Dense vegetation ({veg_pct:.0f}% of area)")
+    elif veg_pct > 15:
+        land_cover_summary.append(f"Moderate vegetation ({veg_pct:.0f}% of area)")
+    else:
+        land_cover_summary.append(f"Low vegetation ({veg_pct:.0f}% of area)")
+    if water_pct > 5:
+        land_cover_summary.append(f"Water bodies present ({water_pct:.0f}%)")
+    if ndvi_change.get("loss_pct", 0) > 10:
+        land_cover_summary.append(f"Vegetation loss detected ({ndvi_change['loss_pct']:.0f}%)")
+    if ndvi_change.get("gain_pct", 0) > 10:
+        land_cover_summary.append(f"Vegetation growth detected ({ndvi_change['gain_pct']:.0f}%)")
+    if not land_cover_summary:
+        land_cover_summary.append("Mixed urban/rural land cover")
+
+    return {
+        "location_name": req.location_name,
+        "lat": req.lat,
+        "lon": req.lon,
+        "preview_url": s2.get("preview_url"),
+        "scene_date": s2.get("scene_date"),
+        "cloud_cover_pct": s2.get("cloud_cover_pct"),
+        "ndvi_mean": s2.get("ndvi_mean"),
+        "ndvi_vegetation_pct": s2.get("ndvi_vegetation_pct"),
+        "ndvi_urban_pct": s2.get("ndvi_urban_pct"),
+        "ndwi_mean": s2.get("ndwi_mean"),
+        "water_coverage_pct": s2.get("water_coverage_pct"),
+        "scl_quality": s2.get("scl_quality"),
+        "ndvi_change": s2.get("ndvi_change"),
+        "settlement_density": s2.get("settlement_density"),
+        "sentinel_scene_count": s2.get("sentinel_scene_count", 0),
+        "ndvi_image": s2.get("ndvi_image"),
+        "ndwi_image": s2.get("ndwi_image"),
+        "land_cover_summary": land_cover_summary,
+        "quality_flags": flags,
+        "error": s2.get("error"),
+        "data_unavailable": s2.get("ndvi_mean") is None,
+    }
+
+
+@app.get("/api/geocode")
+def geocode(q: str):
+    """Geocode a location name to lat/lon using Nominatim."""
+    import urllib.request, json as _json
+    url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(q)}&format=json&limit=5"
+    req_obj = urllib.request.Request(url, headers={"User-Agent": "Solaris-Hackathon/1.0"})
+    with urllib.request.urlopen(req_obj, timeout=10) as resp:
+        results = _json.loads(resp.read().decode())
+    return [
+        {"name": r.get("display_name", ""), "lat": float(r["lat"]), "lon": float(r["lon"])}
+        for r in results if "lat" in r and "lon" in r
+    ]
+
+
+@app.get("/api/locations/{loc_id}/runs")
+def location_runs(loc_id: str, x_api_key: str | None = Header(default=None)):
+    """Fetch run history for a location."""
+    _require_auth(x_api_key)
+    return {"runs": store.get_runs_for_location(loc_id)}
