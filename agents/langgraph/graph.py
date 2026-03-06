@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import uuid
 from typing import Any, Literal
 
@@ -44,7 +45,13 @@ _DEFAULT_BASE_URL = os.getenv(
 _DEFAULT_API_KEY = os.getenv("SOLARIS_LLM_API_KEY", "ollama")  # Ollama doesn't need a real key
 
 CLOUD_COVER_THRESHOLD = 30.0
-MAX_SATELLITE_RETRIES = 2
+# Single satellite execution per run (no retry pass).
+MAX_SATELLITE_RETRIES = 0
+MAX_SUPERVISOR_CONTEXT_CHARS = 12000
+MAX_SUPERVISOR_TOTAL_CHARS = 20000
+MAX_SUPERVISOR_TOKEN_LIMIT = 200000
+TARGET_SUPERVISOR_TOKENS = 180000
+EST_CHARS_PER_TOKEN = 4.0
 
 
 def _get_llm() -> ChatOpenAI:
@@ -77,7 +84,129 @@ class AgentState(TypedDict):
     completed_steps: list
     errors: list
     satellite_retries: int
+    graph_started_at_ms: float
+    last_tool_ts_ms: float | None
+    step_durations_ms: dict
 
+
+def _truncate_text(value: str, limit: int = 1200) -> str:
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}...[truncated]"
+
+
+def _estimate_tokens_for_messages(messages: list) -> int:
+    total_chars = sum(len(str(getattr(m, "content", ""))) for m in messages)
+    # Rough estimation for OpenAI-compatible tokenization.
+    return int(total_chars / EST_CHARS_PER_TOKEN) + (len(messages) * 8)
+
+
+def _compact_history(messages: list) -> list:
+    """
+    Keep only compact conversational messages for supervisor calls.
+    Tool payloads are summarized via state fields separately.
+    """
+    compact: list = []
+    for msg in messages:
+        mtype = getattr(msg, "type", "")
+        if mtype == "tool":
+            continue
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            continue
+        if isinstance(msg, SystemMessage):
+            continue
+        text = _truncate_text(str(getattr(msg, "content", "")), limit=1200)
+        if isinstance(msg, HumanMessage):
+            compact.append(HumanMessage(content=text))
+        elif isinstance(msg, AIMessage):
+            compact.append(AIMessage(content=text))
+    return compact[-4:]
+
+
+def _safe_result_slice(value: dict, keys: list[str]) -> dict:
+    out = {}
+    for key in keys:
+        if key in value:
+            out[key] = value.get(key)
+    return out
+
+
+def _summarize_state_result(key: str, value: dict) -> str:
+    if not isinstance(value, dict):
+        return "unavailable"
+    if value.get("status") == "failed":
+        return f"FAILED: {value.get('error', 'unknown')}"
+
+    if key == "perception_result":
+        weather = value.get("weather", {}) if isinstance(value.get("weather"), dict) else {}
+        demographics = value.get("demographics", {}) if isinstance(value.get("demographics"), dict) else {}
+        summary = {
+            "status": value.get("status"),
+            "confidence": value.get("confidence"),
+            "weather": _safe_result_slice(weather, ["sun_hours", "rain_risk", "source"]),
+            "demographics": _safe_result_slice(demographics, ["households", "country_code", "source"]),
+            "quality_flags": value.get("quality_flags", [])[:6],
+        }
+        return json.dumps(summary, default=str)
+
+    if key == "spatial_result":
+        fs = value.get("feature_summaries", {}) if isinstance(value.get("feature_summaries"), dict) else {}
+        summary = {
+            "status": value.get("status"),
+            "confidence": value.get("confidence"),
+            "feature_summaries": _safe_result_slice(
+                fs,
+                [
+                    "ndvi_mean",
+                    "ndwi_mean",
+                    "water_coverage_pct",
+                    "settlement_density",
+                    "scene_date",
+                    "sentinel_scene_count",
+                    "error",
+                ],
+            ),
+            "quality_flags": value.get("quality_flags", [])[:6],
+        }
+        return json.dumps(summary, default=str)
+
+    if key == "satellite_result":
+        summary = _safe_result_slice(
+            value,
+            [
+                "status",
+                "source",
+                "sentinel_scene_count",
+                "avg_cloud_cover",
+                "best_scene_cloud_cover",
+                "ndvi_estimate",
+                "is_cloudy",
+                "date_range",
+            ],
+        )
+        return json.dumps(summary, default=str)
+
+    if key == "energy_result":
+        demand = value.get("demand_forecast", {}) if isinstance(value.get("demand_forecast"), dict) else {}
+        primary = (
+            value.get("scenario_set", {}).get("primary", {})
+            if isinstance(value.get("scenario_set"), dict)
+            else {}
+        )
+        summary = {
+            "status": value.get("status"),
+            "confidence": value.get("confidence"),
+            "demand_forecast": _safe_result_slice(demand, ["kwh_per_day", "lower_ci", "upper_ci"]),
+            "primary_plan": _safe_result_slice(primary, ["pv_kw", "battery_kwh", "solar_kits"]),
+            "quality_flags": value.get("quality_flags", [])[:6],
+        }
+        return json.dumps(summary, default=str)
+
+    if key == "evidence_result":
+        summary = _safe_result_slice(value, ["status", "confidence", "summary", "quality_flags"])
+        return json.dumps(summary, default=str)
+
+    return "SUCCESS"
 
 # ── Node: supervisor ────────────────────────────────────────────────────────
 
@@ -104,18 +233,44 @@ def supervisor_node(state: AgentState) -> dict:
     if "evidence_pack" in plan: available_tools.append(evidence_pack)
         
     llm_with_tools = llm.bind_tools(available_tools)
-
     messages = state.get("messages", [])
     logger.info("--- SUPERVISOR STARTING ---")
 
-    # Inject system prompt if not present
-    if not messages or not isinstance(messages[0], SystemMessage):
-        messages = [SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)] + messages
+    # Keep supervisor input compact to avoid context overflows.
+    compact_history = _compact_history(messages)
 
-    # Build a context message so the LLM knows current state
+    # Build a context message so the LLM knows current state.
     context = _build_context_message(state)
     logger.info("Supervisor context built. Invoking LLM...")
-    full_messages = messages + [HumanMessage(content=context)]
+    full_messages = [SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)] + compact_history + [HumanMessage(content=context)]
+
+    total_chars = sum(len(str(getattr(m, "content", ""))) for m in full_messages)
+    estimated_tokens = _estimate_tokens_for_messages(full_messages)
+    if total_chars > MAX_SUPERVISOR_TOTAL_CHARS or estimated_tokens > TARGET_SUPERVISOR_TOKENS:
+        # Token-budget guardrail: progressively drop history, then truncate context.
+        while compact_history and estimated_tokens > TARGET_SUPERVISOR_TOKENS:
+            compact_history = compact_history[1:]
+            full_messages = [SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)] + compact_history + [HumanMessage(content=context)]
+            estimated_tokens = _estimate_tokens_for_messages(full_messages)
+
+        if estimated_tokens > TARGET_SUPERVISOR_TOKENS:
+            context = _truncate_text(context, MAX_SUPERVISOR_TOTAL_CHARS // 2)
+            full_messages = [SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)] + compact_history + [HumanMessage(content=context)]
+            estimated_tokens = _estimate_tokens_for_messages(full_messages)
+
+        logger.warning(
+            "Supervisor payload trimmed. chars=%s estimated_tokens=%s",
+            sum(len(str(getattr(m, "content", ""))) for m in full_messages),
+            estimated_tokens,
+        )
+    else:
+        logger.info("Supervisor payload size chars=%s estimated_tokens=%s", total_chars, estimated_tokens)
+
+    if estimated_tokens > MAX_SUPERVISOR_TOKEN_LIMIT:
+        # Hard stop before API call.
+        raise RuntimeError(
+            f"supervisor payload too large after trimming: estimated_tokens={estimated_tokens}"
+        )
 
     response = llm_with_tools.invoke(full_messages)
 
@@ -129,9 +284,9 @@ def supervisor_node(state: AgentState) -> dict:
 
 
 def _build_context_message(state: AgentState) -> str:
-    """Build a summary of current state for the LLM."""
+    """Build a compact summary of current state for the LLM."""
     parts = [
-        f"**System Note**: The 'Request Parameters' block below may contain default or previous query values. DO NOT trigger an energy analysis unless the user explicitly asks for it in their current message.",
+        "**System Note**: Use only current user intent; avoid re-running analysis unless requested.",
         f"**Request Parameters**: {json.dumps(state.get('request', {}), default=str)}",
         f"**Plan**: {state.get('plan', [])}",
         f"**Completed steps**: {state.get('completed_steps', [])}",
@@ -141,45 +296,32 @@ def _build_context_message(state: AgentState) -> str:
     if state.get("replan_reason"):
         parts.append(f"**Last replan reason**: {state['replan_reason']}")
 
-    for key in ["perception_result", "spatial_result", "satellite_result",
-                 "energy_result", "evidence_result"]:
-        val = state.get(key)
-        if val:
-            # Just tell the LLM that the result exists, don't dump the massive JSON
-            # unless it's the satellite result (needs it for cloud cover replanning checks)
-            if key == "satellite_result":
-                summary = json.dumps(val, default=str)
-                parts.append(f"**{key}**: {summary}")
-            elif isinstance(val, dict) and val.get("status") == "failed":
-                parts.append(f"**{key}**: FAILED - {val.get('error')}")
-            else:
-                parts.append(f"**{key}**: SUCCESS (data stored in state)")
+    for key in ["perception_result", "spatial_result", "satellite_result", "energy_result", "evidence_result"]:
+        value = state.get(key)
+        if value:
+            parts.append(f"**{key} summary**: {_summarize_state_result(key, value)}")
 
-    # Determine next step
     plan = state.get("plan", [])
     completed = state.get("completed_steps", [])
     remaining = [s for s in plan if s not in completed]
 
     if remaining:
+        next_tool = remaining[0]
         parts.append(
-            f"\n**Next step**: Call the `{remaining[0]}` tool. "
-            f"Pass this JSON as input: {_build_tool_input(remaining[0], state)}"
+            f"**Next step**: Call `{next_tool}` with: {_build_tool_input(next_tool, state)}"
         )
     elif plan:
-        parts.append(
-            "\n**All steps complete**. Synthesise the final energy-needs "
-            "report from the accumulated results."
-        )
+        parts.append("**All steps complete**: produce a concise completion response.")
     else:
         parts.append(
-            "\n**Instructions**: Determine what the user wants. "
-            "If they are just chatting or answering a question, respond conversationally and do NOT call any tools. "
-            "If they expressly ask to run an energy analysis, forecast demand, or size a system, call `run_energy_analysis`. "
-            "If they ask for existing plans, call `search_stored_plans`. "
-            "NEVER call `perception_data`, `spatial_analysis`, `satellite_imagery`, `energy_optimization`, or `evidence_pack` individually without calling `run_energy_analysis` first."
+            "**Instructions**: detect intent. Greetings => conversational reply only. "
+            "Analysis request => call `run_energy_analysis`. Existing plans => call `search_stored_plans`."
         )
 
-    return "\n".join(parts)
+    context = "\n".join(parts)
+    if len(context) > MAX_SUPERVISOR_CONTEXT_CHARS:
+        context = _truncate_text(context, MAX_SUPERVISOR_CONTEXT_CHARS)
+    return context
 
 
 def _build_tool_input(tool_name: str, state: AgentState) -> str:
@@ -197,8 +339,11 @@ def _build_tool_input(tool_name: str, state: AgentState) -> str:
             "lon": request.get("lon"),
             "date_offset": retries * 90,
         }, default=str)
-    elif tool_name in ["energy_optimization", "evidence_pack", "run_energy_analysis"]:
-        # The LLM now just passes down the original request arguments
+    elif tool_name == "energy_optimization":
+        return json.dumps(request, default=str)
+    elif tool_name == "evidence_pack":
+        return json.dumps(request, default=str)
+    elif tool_name == "run_energy_analysis":
         return json.dumps(request, default=str)
     else:
         return json.dumps(request, default=str)
@@ -238,11 +383,18 @@ def process_tool_result(state: AgentState) -> dict:
         completed.append(tool_name)
     updates["completed_steps"] = completed
 
-    # Check for triggers that require manual function execution
-    # (Because passing massive state via the LLM context window crashes it)
+    # Approximate per-step timing (tool cycle elapsed since last tool completion).
+    now_ms = time.perf_counter() * 1000.0
+    baseline_ms = state.get("last_tool_ts_ms") or state.get("graph_started_at_ms") or now_ms
+    elapsed_ms = max(1.0, now_ms - float(baseline_ms))
+    step_durations = dict(state.get("step_durations_ms", {}))
+    step_durations[tool_name] = float(step_durations.get(tool_name, 0.0)) + elapsed_ms
+    updates["step_durations_ms"] = step_durations
+    updates["last_tool_ts_ms"] = now_ms
+
+    # Check for pipeline trigger emitted by run_energy_analysis.
     if isinstance(tool_result, dict) and "__trigger__" in tool_result:
         trigger = tool_result["__trigger__"]
-        req = tool_result.get("request", {})
         
         try:
             if trigger == "run_energy_analysis":
@@ -261,27 +413,26 @@ def process_tool_result(state: AgentState) -> dict:
                 updates["plan"] = plan
                 tool_result = {"status": "ok", "message": "Pipeline triggered successfully. Proceed with the newly configured plan steps."}
             elif trigger == "energy_optimization":
-                from agents.energy_optimization.agent import optimize_energy_plan
-                tool_result = optimize_energy_plan(
-                    feature_context={
-                        "perception": state.get("perception_result", {}),
-                        "spatial": state.get("spatial_result", {})
-                    }
+                from agents.langgraph.tools import llm_energy_optimization_from_state
+                tool_result = llm_energy_optimization_from_state(
+                    request=state.get("request", {}),
+                    perception=state.get("perception_result") or {},
+                    spatial=state.get("spatial_result") or {},
+                    satellite=state.get("satellite_result") or {},
                 )
             elif trigger == "evidence_pack":
-                from agents.evidence.agent import build_evidence_pack
-                energy = state.get("energy_result", {})
-                
-                # Check for degraded status to pass down
-                all_results = [state.get("perception_result", {}), state.get("spatial_result", {}), energy]
-                is_degraded = any(r.get("status") == "degraded" for r in all_results if isinstance(r, dict))
-                quality = {"status": "degraded" if is_degraded else "ok"}
-
-                tool_result = build_evidence_pack(
-                    request=req,
-                    feature_context={"spatial": state.get("spatial_result", {})},
-                    optimization=energy
+                from agents.langgraph.tools import llm_evidence_pack_from_state
+                tool_result = llm_evidence_pack_from_state(
+                    request=state.get("request", {}),
+                    feature_context={
+                        "perception": state.get("perception_result") or {},
+                        "spatial": state.get("spatial_result") or {},
+                        "satellite": state.get("satellite_result") or {},
+                    },
+                    optimization=state.get("energy_result") or {},
                 )
+            else:
+                tool_result = {"status": "failed", "error": f"Unknown trigger: {trigger}"}
         except Exception as exc:
             logger.exception(f"Trigger {trigger} failed")
             tool_result = {"status": "failed", "error": str(exc)}
@@ -437,6 +588,7 @@ def run_solaris_graph(
     horizon_days: int = 30,
     thread_id: str | None = None,
     usage_profile: str | None = None,
+    history: list[dict] | None = None,
 ) -> dict:
     """
     Execute the Solaris LangGraph agent.
@@ -472,8 +624,26 @@ def run_solaris_graph(
         "usage_profile": usage_profile,
     }
 
+    started_at_ms = time.perf_counter() * 1000.0
+
+    initial_messages: list = []
+    if isinstance(history, list):
+        for item in history[-24:]:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", "")).strip().lower()
+            content = str(item.get("content", "")).strip()
+            if not content:
+                continue
+            if role == "user":
+                initial_messages.append(HumanMessage(content=content))
+            elif role in {"assistant", "agent", "ai"}:
+                initial_messages.append(AIMessage(content=content))
+    if not initial_messages or str(getattr(initial_messages[-1], "content", "")).strip() != message.strip():
+        initial_messages.append(HumanMessage(content=message))
+
     initial_state: AgentState = {
-        "messages": [HumanMessage(content=message)],
+        "messages": initial_messages,
         "request": request,
         "perception_result": None,
         "spatial_result": None,
@@ -485,6 +655,9 @@ def run_solaris_graph(
         "completed_steps": [],
         "errors": [],
         "satellite_retries": 0,
+        "graph_started_at_ms": started_at_ms,
+        "last_tool_ts_ms": None,
+        "step_durations_ms": {},
     }
 
     config = {"configurable": {"thread_id": thread_id or request["request_id"]}}
@@ -501,6 +674,7 @@ def run_solaris_graph(
             **initial_state,
             "errors": [str(exc)],
         }
+    total_elapsed_ms = max(1.0, (time.perf_counter() * 1000.0) - started_at_ms)
 
     # Extract the final AI response
     last_ai_message = None
@@ -512,6 +686,13 @@ def run_solaris_graph(
     return {
         "thread_id": config["configurable"]["thread_id"],
         "response": last_ai_message or "Analysis complete.",
+        "history": [
+            {"role": "user", "content": str(msg.content)}
+            if isinstance(msg, HumanMessage)
+            else {"role": "assistant", "content": str(msg.content)}
+            for msg in final_state.get("messages", [])
+            if isinstance(msg, (HumanMessage, AIMessage)) and getattr(msg, "content", None)
+        ],
         "request": request,
         "perception_result": final_state.get("perception_result"),
         "spatial_result": final_state.get("spatial_result"),
@@ -519,6 +700,11 @@ def run_solaris_graph(
         "energy_result": final_state.get("energy_result"),
         "evidence_result": final_state.get("evidence_result"),
         "completed_steps": final_state.get("completed_steps", []),
+        "step_durations_ms": final_state.get("step_durations_ms", {}),
+        "total_duration_ms": total_elapsed_ms,
         "errors": final_state.get("errors", []),
         "replan_reason": final_state.get("replan_reason"),
     }
+
+
+

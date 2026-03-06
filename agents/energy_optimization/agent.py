@@ -151,57 +151,146 @@ def optimize_energy_plan(feature_context: dict) -> dict:
         confidence_score=confidence,
     )
 
-    # ── Build actionable timeline based on scale and conditions ──────────────
+    # Build a scale-aware project delivery plan.
     now = datetime.now(timezone.utc)
-    scale = "large" if pv_kw > 50 else ("medium" if pv_kw > 20 else "small")
-    prep_days = 21 if scale == "large" else 14
-    procurement_days = 45 if scale == "large" else 30
-    install_days = 60 if scale == "large" else 45
-    handover_days = 80 if scale == "large" else 60
+    lead_days = max(2, min(10, int(round(households / 90.0))))
+    kickoff = now + timedelta(days=lead_days)
+    timeline: list[dict] = []
+    cursor = kickoff
 
-    # Add flood-risk mitigation step if needed
-    timeline = []
+    def _add_phase(
+        milestone: str,
+        duration_days: int,
+        note: str,
+        *,
+        owner: str,
+        deliverables: list[str] | None = None,
+        risk_controls: list[str] | None = None,
+        depends_on: list[str] | None = None,
+    ) -> None:
+        nonlocal cursor
+        duration = max(1, int(duration_days))
+        start = cursor
+        end = start + timedelta(days=duration)
+        timeline.append(
+            {
+                "milestone": milestone,
+                "status": "pending",
+                "start_date": start.strftime("%Y-%m-%d"),
+                "end_date": end.strftime("%Y-%m-%d"),
+                "date": end.strftime("%Y-%m-%d"),
+                "duration_days": duration,
+                "owner": owner,
+                "depends_on": depends_on or [],
+                "deliverables": deliverables or [],
+                "risk_controls": risk_controls or [],
+                "note": note,
+            }
+        )
+        cursor = end
+
+    community_days = max(5, min(14, int(round(4 + households / 140.0))))
+    survey_days = max(6, min(18, int(round(5 + households / 180.0))))
+    design_days = max(8, min(24, int(round(8 + pv_kw / 6.0))))
+    procurement_days = max(12, min(45, int(round(10 + pv_kw / 4.0 + battery_kwh / 60.0))))
+    civil_days = max(7, min(24, int(round(6 + households / 220.0 + (water_pct / 5.0)))))
+    install_days = max(10, min(48, int(round(9 + solar_kits / 9.0))))
+    commission_days = max(6, min(21, int(round(5 + households / 180.0))))
+
+    _add_phase(
+        "Community Alignment & Load Census",
+        community_days,
+        f"Validate anchor loads, household tiers, and final scope for {households} households.",
+        owner="Community & PMO",
+        deliverables=[
+            "Signed community engagement log",
+            "Metering and load census baseline",
+            "Final beneficiary roster",
+        ],
+        risk_controls=["Stakeholder sign-off before procurement"],
+    )
+
+    _add_phase(
+        "Topographic, Electrical & Interconnection Survey",
+        survey_days,
+        f"Settlement density: {density}. {('; '.join(land_cover[:2])) if land_cover else 'Mixed terrain context.'}",
+        owner="Survey + Electrical Engineering",
+        depends_on=["Community Alignment & Load Census"],
+        deliverables=["Survey report", "Single-line draft", "Interconnection constraints register"],
+        risk_controls=["QA check on geospatial and wiring route assumptions"],
+    )
+
     if flood_risk_factor > 1.1 or water_pct > 10:
-        timeline.append({
-            "milestone": "Flood Risk Assessment & Site Elevation Survey",
-            "date": (now + timedelta(days=7)).strftime("%Y-%m-%d"),
-            "status": "pending",
-            "note": f"Water coverage {water_pct:.1f}% detected via Sentinel-2 NDWI"
-        })
-    if veg_loss > 20:
-        timeline.append({
-            "milestone": "Vegetation Loss Investigation",
-            "date": (now + timedelta(days=7)).strftime("%Y-%m-%d"),
-            "status": "pending",
-            "note": f"{veg_loss:.0f}% vegetation loss detected in last 90 days"
-        })
-    timeline += [
-        {
-            "milestone": "Site Preparation & Ground Survey",
-            "date": (now + timedelta(days=prep_days)).strftime("%Y-%m-%d"),
-            "status": "pending",
-            "note": f"Settlement density: {density}. {'; '.join(land_cover[:2]) if land_cover else ''}"
-        },
-        {
-            "milestone": "Procurement & Equipment Transit",
-            "date": (now + timedelta(days=procurement_days)).strftime("%Y-%m-%d"),
-            "status": "pending",
-            "note": f"{pv_kw:.1f} kW PV array + {battery_kwh:.1f} kWh battery storage"
-        },
-        {
-            "milestone": "Installation & Wiring",
-            "date": (now + timedelta(days=install_days)).strftime("%Y-%m-%d"),
-            "status": "pending",
-            "note": f"{solar_kits} solar kits for {households} households"
-        },
-        {
-            "milestone": "Commissioning & Community Handover",
-            "date": (now + timedelta(days=handover_days)).strftime("%Y-%m-%d"),
-            "status": "pending",
-            "note": "System testing, training, and handover to local operators"
-        },
-    ]
+        _add_phase(
+            "Flood Mitigation & Foundation Design",
+            max(5, min(14, int(round(4 + water_pct / 2.0)))),
+            f"Water coverage {water_pct:.1f}% and flood factor {flood_risk_factor:.2f} require elevated foundations and drainage controls.",
+            owner="Civil + HSE",
+            depends_on=["Topographic, Electrical & Interconnection Survey"],
+            deliverables=["Elevation design", "Drainage and access plan"],
+            risk_controls=["Monsoon contingency and water ingress protection"],
+        )
 
+    if veg_loss > 20:
+        _add_phase(
+            "Vegetation Change Verification & Shading Mitigation",
+            max(4, min(10, int(round(3 + veg_loss / 20.0)))),
+            f"{veg_loss:.0f}% vegetation-loss signal detected; verify if due to construction, drought, or land-use change.",
+            owner="Environmental + Design",
+            depends_on=["Topographic, Electrical & Interconnection Survey"],
+            deliverables=["Updated shading map", "Adjusted array siting plan"],
+            risk_controls=["Avoid oversizing from stale vegetation assumptions"],
+        )
+
+    _add_phase(
+        "Detailed Engineering, Permit Pack & BoQ Freeze",
+        design_days,
+        f"Finalize {pv_kw:.1f} kW PV + {battery_kwh:.1f} kWh BESS architecture and protection settings.",
+        owner="Design Authority",
+        depends_on=[timeline[-1]["milestone"]] if timeline else [],
+        deliverables=["Approved BoQ", "Permit package", "Issued-for-construction drawings"],
+        risk_controls=["Design review gate and compliance checklist"],
+    )
+
+    _add_phase(
+        "Procurement, Factory Acceptance & Logistics",
+        procurement_days,
+        f"Order long-lead components and stage transport for {solar_kits} kit-equivalents.",
+        owner="Supply Chain",
+        depends_on=["Detailed Engineering, Permit Pack & BoQ Freeze"],
+        deliverables=["PO tracker", "Factory acceptance records", "Inbound delivery schedule"],
+        risk_controls=["Approved vendor list and buffer stock for critical spares"],
+    )
+
+    _add_phase(
+        "Civil Works, Mounting & Balance-of-System Prep",
+        civil_days,
+        "Construct foundations, cable trenches, and battery shelter with HSE controls.",
+        owner="EPC Civil Team",
+        depends_on=["Procurement, Factory Acceptance & Logistics"],
+        deliverables=["Civil completion punch list", "Earthing and conduit readiness"],
+        risk_controls=["Daily HSE audit and weather-safe work windows"],
+    )
+
+    _add_phase(
+        "PV/BESS Installation, Wiring & QA/QC",
+        install_days,
+        f"Install and wire {solar_kits} kits covering {households} households with progressive commissioning.",
+        owner="EPC Electrical Team",
+        depends_on=["Civil Works, Mounting & Balance-of-System Prep"],
+        deliverables=["As-built wiring map", "QA/QC checklist", "Protection relay settings"],
+        risk_controls=["Insulation testing and staged energization procedure"],
+    )
+
+    _add_phase(
+        "Commissioning, Training & Operational Handover",
+        commission_days,
+        "Run reliability tests, train local operators, and hand over O&M playbooks.",
+        owner="Commissioning + O&M",
+        depends_on=["PV/BESS Installation, Wiring & QA/QC"],
+        deliverables=["Commissioning certificate", "Operator training records", "90-day O&M plan"],
+        risk_controls=["Post-handover support window and spare-parts readiness"],
+    )
     # ── Spatial intelligence summary for frontend ─────────────────────────────
     spatial_insights = {
         "ndvi_mean": ndvi,
@@ -385,3 +474,4 @@ def optimize_energy_plan(feature_context: dict) -> dict:
         },
         "impact_metrics": impact,
     }
+

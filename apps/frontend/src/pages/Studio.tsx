@@ -1,19 +1,17 @@
 import { useState, useRef, useEffect } from "react"
 import { motion } from "framer-motion"
 import {
-    Send, Terminal, Bot, User, Orbit, Play, ChevronRight,
+    Send, Terminal, Bot, User, ChevronRight,
     Satellite, Leaf, Droplets, BarChart2, CloudRain, Crosshair,
-    Shield, Layers, ImageIcon, TrendingDown, TrendingUp, Loader2
+    Shield, Layers, ImageIcon, TrendingDown, TrendingUp
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card } from "@/components/ui/card"
 import { useNavigate } from "react-router-dom"
 
 const API = "http://localhost:8000"
 
-/* ── Satellite result types ── */
 interface SatelliteResult {
     location_name: string
     lat: number
@@ -43,7 +41,32 @@ interface SatelliteResult {
     data_unavailable: boolean
 }
 
-/* ── Small reusable components ── */
+type ChatMessage = { role: "agent" | "user"; text: string }
+type ActiveView = "true-color" | "ndvi" | "ndwi"
+
+interface PersistedStudioState {
+    messages: ChatMessage[]
+    satResult: SatelliteResult | null
+    satError: string | null
+    activeView: ActiveView
+    threadId: string
+}
+
+const STUDIO_STORAGE_KEY = "solaris-studio-session-v1"
+const DEFAULT_MESSAGES: ChatMessage[] = [
+    {
+        role: "agent",
+        text: "Solaris Agent Initialized. Ask for energy analysis with a location to run the full workflow.",
+    },
+]
+
+const createThreadId = () => {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID()
+    }
+    return `studio-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 function StatCard({ icon: Icon, label, value, sub, color = "text-primary" }: {
     icon: any; label: string; value: string; sub?: string; color?: string
 }) {
@@ -82,134 +105,123 @@ function SCLBar({ label, pct, color }: { label: string; pct: number; color: stri
     )
 }
 
-/* ── Main component ── */
 export default function Studio() {
     const navigate = useNavigate()
-    const [messages, setMessages] = useState<{ role: "agent" | "user", text: string }[]>([
-        { role: "agent", text: "Solaris Agent Initialized. I am ready to process new deployment zones. Please provide the mission parameters." }
-    ])
-
-    const [formData, setFormData] = useState({
-        name: "Alpha Outpost, Kenya",
-        lat: "-1.2",
-        lon: "36.8",
-        households: "120"
-    })
+    const [messages, setMessages] = useState<ChatMessage[]>(DEFAULT_MESSAGES)
 
     const [isProcessing, setIsProcessing] = useState(false)
     const [chatInput, setChatInput] = useState("")
     const bottomRef = useRef<HTMLDivElement>(null)
 
-    /* satellite state */
     const [satResult, setSatResult] = useState<SatelliteResult | null>(null)
     const [satLoading, setSatLoading] = useState(false)
     const [satError, setSatError] = useState<string | null>(null)
-    const [activeView, setActiveView] = useState<"true-color" | "ndvi" | "ndwi">("true-color")
+    const [activeView, setActiveView] = useState<ActiveView>("true-color")
+    const [threadId, setThreadId] = useState(createThreadId)
+    const [hydrated, setHydrated] = useState(false)
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" })
     }, [messages])
 
-    /* ── Run satellite analysis ── */
-    const runSatelliteAnalysis = async (lat: number, lon: number, name: string) => {
-        setSatLoading(true)
-        setSatError(null)
-        setSatResult(null)
-        setActiveView("true-color")
+    useEffect(() => {
         try {
-            const res = await fetch(`${API}/api/satellite/search`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ lat, lon, location_name: name })
-            })
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ detail: "Unknown error" }))
-                throw new Error(err.detail || `HTTP ${res.status}`)
-            }
-            const data = await res.json()
-            setSatResult(data)
-            setMessages(prev => [...prev, {
-                role: "agent",
-                text: `[SAT] Sentinel-2 analysis complete — NDVI: ${data.ndvi_mean?.toFixed(3) ?? "N/A"}, NDWI: ${data.ndwi_mean?.toFixed(3) ?? "N/A"}, Cloud: ${data.cloud_cover_pct?.toFixed(1) ?? "N/A"}%. Scroll down to view imagery.`
-            }])
-        } catch (e: any) {
-            setSatError(e.message || "Satellite analysis failed")
-            setMessages(prev => [...prev, { role: "agent", text: `[ERROR] Satellite analysis failed: ${e.message}` }])
-        } finally {
-            setSatLoading(false)
-        }
-    }
-
-    const handlePrompt = async () => {
-        if (!formData.name) return
-
-        setMessages(prev => [...prev, {
-            role: "user",
-            text: `Analyze energy needs for ${formData.name} at coordinates [${formData.lat}, ${formData.lon}] with ${formData.households} households.`
-        }])
-        setIsProcessing(true)
-
-        const lat = parseFloat(formData.lat)
-        const lon = parseFloat(formData.lon)
-
-        // Kick off satellite analysis in parallel
-        runSatelliteAnalysis(lat, lon, formData.name)
-
-        try {
-            const res = await fetch(`${API}/api/chat`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    message: `Analyze energy needs for ${formData.name} at coordinates [${formData.lat}, ${formData.lon}] with ${formData.households} households.`,
-                    lat,
-                    lon,
-                    households: parseInt(formData.households) || 100
-                })
-            })
-            const data = await res.json()
-
-            setIsProcessing(false)
-            if (data.status === "completed" && data.messages) {
-                // Find the agent's final response in the messages array
-                const lastMsg = [...data.messages].reverse().find(m => m.type === "ai" && m.content)
-                if (lastMsg) {
-                    setMessages(prev => [...prev, {
-                        role: "agent",
-                        text: typeof lastMsg.content === 'string' ? lastMsg.content : "[SUCCESS] Analysis complete."
-                    }])
+            const raw = localStorage.getItem(STUDIO_STORAGE_KEY)
+            if (raw) {
+                const parsed = JSON.parse(raw) as Partial<PersistedStudioState>
+                if (Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+                    setMessages(parsed.messages as ChatMessage[])
+                }
+                if (parsed.satResult && typeof parsed.satResult === "object") {
+                    setSatResult(parsed.satResult as SatelliteResult)
+                }
+                if (typeof parsed.satError === "string" || parsed.satError === null) {
+                    setSatError(parsed.satError ?? null)
+                }
+                if (parsed.activeView === "true-color" || parsed.activeView === "ndvi" || parsed.activeView === "ndwi") {
+                    setActiveView(parsed.activeView)
+                }
+                if (typeof parsed.threadId === "string" && parsed.threadId.trim().length > 0) {
+                    setThreadId(parsed.threadId)
                 }
             } else {
-                setMessages(prev => [...prev, { role: "agent", text: "[ERROR] Agent failed to optimize location." }])
+                setThreadId(createThreadId())
             }
-        } catch (err) {
-            console.error(err)
-            setIsProcessing(false)
-            setMessages(prev => [...prev, { role: "agent", text: "[CRITICAL] Connection to Mainframe failed." }])
+        } catch (error) {
+            console.error("Failed to hydrate studio session", error)
+        } finally {
+            setHydrated(true)
         }
-    }
+    }, [])
+
+    useEffect(() => {
+        if (!hydrated) return
+        const payload: PersistedStudioState = {
+            messages,
+            satResult,
+            satError,
+            activeView,
+            threadId,
+        }
+        localStorage.setItem(STUDIO_STORAGE_KEY, JSON.stringify(payload))
+    }, [hydrated, messages, satResult, satError, activeView, threadId])
 
     const handleChat = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!chatInput.trim()) return
 
         const userInput = chatInput
-        setMessages(prev => [...prev, { role: "user", text: userInput }])
+        const likelyAnalysis = /\b(energy|power|solar|usage|load|forecast|optimiz|plan|analy|calculate|design)\b/i.test(userInput)
+        const nextMessages: ChatMessage[] = [...messages, { role: "user" as const, text: userInput }]
+        const historyPayload = nextMessages
+            .filter((m) => m.text !== DEFAULT_MESSAGES[0].text)
+            .map((m) => ({
+                role: m.role === "user" ? "user" : "assistant",
+                content: m.text,
+            }))
+        setMessages(nextMessages)
         setChatInput("")
         setIsProcessing(true)
+        setSatLoading(likelyAnalysis)
 
         try {
             const res = await fetch(`${API}/api/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: userInput })
+                body: JSON.stringify({ message: userInput, thread_id: threadId, history: historyPayload })
             })
-            const data = await res.json()
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+                throw new Error(typeof data.detail === "string" ? data.detail : "Agent process failed.")
+            }
 
             setIsProcessing(false)
+            setSatLoading(false)
+            if (typeof data.thread_id === "string" && data.thread_id.trim().length > 0) {
+                setThreadId(data.thread_id)
+            }
+            if (data.satellite) {
+                setSatResult(data.satellite as SatelliteResult)
+                setSatError(null)
+                setActiveView("true-color")
+            }
+            if (Array.isArray(data.history) && data.history.length > 0) {
+                const serverHistory = data.history
+                    .filter((m: any) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim().length > 0)
+                    .map((m: any) => ({
+                        role: m.role === "user" ? "user" as const : "agent" as const,
+                        text: m.content,
+                    }))
+                if (serverHistory.length > 0) {
+                    setMessages(serverHistory)
+                }
+            }
             if (data.status === "completed" && data.messages) {
-                const lastMsg = [...data.messages].reverse().find(m => m.type === "ai" && m.content)
+                const lastMsg = [...data.messages].reverse().find((m: any) => m.type === "ai" && m.content)
                 if (lastMsg) {
-                    setMessages(prev => [...prev, { role: "agent", text: typeof lastMsg.content === 'string' ? lastMsg.content : JSON.stringify(lastMsg.content) }])
+                    const rawText = typeof lastMsg.content === "string" ? lastMsg.content : JSON.stringify(lastMsg.content)
+                    const text = data.run_id && !rawText.includes("[SUCCESS]") ? `[SUCCESS] ${rawText}` : rawText
+                    setMessages(prev => (prev[prev.length - 1]?.text === text ? prev : [...prev, { role: "agent", text }]))
                 }
             } else {
                 setMessages(prev => [...prev, { role: "agent", text: "[ERROR] Agent process failed." }])
@@ -217,8 +229,22 @@ export default function Studio() {
         } catch (err) {
             console.error(err)
             setIsProcessing(false)
+            setSatLoading(false)
+            setSatError((err as Error).message || "Request failed.")
             setMessages(prev => [...prev, { role: "agent", text: "[CRITICAL] Connection failed." }])
         }
+    }
+
+    const handleNewChat = () => {
+        setMessages(DEFAULT_MESSAGES)
+        setChatInput("")
+        setSatResult(null)
+        setSatError(null)
+        setActiveView("true-color")
+        setIsProcessing(false)
+        setSatLoading(false)
+        setThreadId(createThreadId())
+        localStorage.removeItem(STUDIO_STORAGE_KEY)
     }
 
     const activeImage = activeView === "ndvi" ? satResult?.ndvi_image
@@ -228,88 +254,27 @@ export default function Studio() {
     return (
         <div className="flex flex-col w-full bg-[#030712] overflow-y-auto">
 
-            {/* ── Top row: Form + Terminal ── */}
-            <div className="flex p-6 gap-6 h-[620px] shrink-0">
-
-                {/* Left: Structured Data Form */}
-                <div className="w-[400px] flex flex-col gap-6 h-full shrink-0">
-                    <div className="flex items-center gap-3 text-primary">
-                        <Orbit className="h-6 w-6 animate-spin-slow" />
-                        <h1 className="text-2xl font-bold tracking-tight">Mission Control</h1>
-                    </div>
-
-                    <Card className="glass-panel border-white/10 flex-1 overflow-y-auto">
-                        <CardContent className="p-6 space-y-6">
-                            <h3 className="font-medium text-lg text-foreground border-b border-white/10 pb-2">Structured Prompt</h3>
-
-                            <div className="space-y-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="name" className="text-muted-foreground uppercase text-xs tracking-wider">Project Name</Label>
-                                    <Input
-                                        id="name"
-                                        value={formData.name}
-                                        onChange={e => setFormData({ ...formData, name: e.target.value })}
-                                        className="bg-black/50 border-white/10 focus-visible:ring-primary"
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="lat" className="text-muted-foreground uppercase text-xs tracking-wider">Latitude</Label>
-                                        <Input
-                                            id="lat" type="number" step="0.0001"
-                                            value={formData.lat}
-                                            onChange={e => setFormData({ ...formData, lat: e.target.value })}
-                                            className="bg-black/50 border-white/10 font-mono"
-                                        />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="lon" className="text-muted-foreground uppercase text-xs tracking-wider">Longitude</Label>
-                                        <Input
-                                            id="lon" type="number" step="0.0001"
-                                            value={formData.lon}
-                                            onChange={e => setFormData({ ...formData, lon: e.target.value })}
-                                            className="bg-black/50 border-white/10 font-mono"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <Label htmlFor="hh" className="text-muted-foreground uppercase text-xs tracking-wider">Households</Label>
-                                    <Input
-                                        id="hh" type="number"
-                                        value={formData.households}
-                                        onChange={e => setFormData({ ...formData, households: e.target.value })}
-                                        className="bg-black/50 border-white/10 font-mono"
-                                    />
-                                </div>
-
-                                <div className="pt-4">
-                                    <Button
-                                        onClick={handlePrompt}
-                                        disabled={isProcessing || satLoading}
-                                        className="w-full h-12 text-sm font-bold tracking-widest uppercase neon-glow transition-all"
-                                    >
-                                        {(isProcessing || satLoading) ? (
-                                            <Orbit className="h-5 w-5 animate-spin" />
-                                        ) : (
-                                            <>
-                                                <Play className="mr-2 h-4 w-4 fill-current" /> Initialize Deployment
-                                            </>
-                                        )}
-                                    </Button>
-                                </div>
-
-                            </div>
-                        </CardContent>
-                    </Card>
-                </div>
-
-                {/* Right: Agent Terminal / Chat */}
-                <Card className="flex-1 glass-panel border-white/10 flex flex-col overflow-hidden relative">
-                    <div className="h-14 border-b border-primary/20 bg-primary/5 flex items-center px-4 gap-3">
-                        <Terminal className="text-primary h-5 w-5" />
-                        <span className="font-mono text-primary text-sm tracking-widest object-cover">AGENT LINK ESTABLISHED</span>
+            {/* Top row: Chat Terminal */}
+            <div className="p-6 h-[620px] shrink-0">
+                <Card className="h-full glass-panel border-white/10 flex flex-col overflow-hidden relative">
+                    <div className="h-14 border-b border-primary/20 bg-primary/5 flex items-center justify-between px-4 gap-3">
+                        <div className="flex items-center gap-3">
+                            <Terminal className="text-primary h-5 w-5" />
+                            <span className="font-mono text-primary text-sm tracking-widest object-cover">AGENT LINK ESTABLISHED</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="hidden md:inline text-[11px] text-muted-foreground font-mono">
+                                Session {threadId.slice(0, 8)}
+                            </span>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleNewChat}
+                                className="h-8 border-white/20 bg-white/5 text-foreground hover:bg-white/10"
+                            >
+                                New Chat
+                            </Button>
+                        </div>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth font-mono text-sm leading-relaxed">
@@ -362,7 +327,7 @@ export default function Studio() {
                                     <Bot className="h-4 w-4 text-primary" />
                                 </div>
                                 <div className="px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-muted-foreground flex items-center gap-2">
-                                    <span className="animate-pulse">_</span> {satLoading ? "Fetching Sentinel-2 imagery…" : "Processing..."}
+                                    <span className="animate-pulse">_</span> {satLoading ? "Executing Tools..." : "Processing..."}
                                 </div>
                             </motion.div>
                         )}
@@ -374,10 +339,15 @@ export default function Studio() {
                             <Input
                                 value={chatInput}
                                 onChange={e => setChatInput(e.target.value)}
-                                placeholder="Query the agent or request clarifications..."
+                                placeholder="Ask anything, or request energy analysis for a location..."
                                 className="bg-white/5 border-white/10 h-12 font-mono"
                             />
-                            <Button type="submit" size="icon" className="h-12 w-12 shrink-0 bg-white/10 hover:bg-white/20 text-foreground">
+                            <Button
+                                type="submit"
+                                size="icon"
+                                disabled={isProcessing || satLoading || !chatInput.trim()}
+                                className="h-12 w-12 shrink-0 bg-white/10 hover:bg-white/20 text-foreground disabled:opacity-50"
+                            >
                                 <Send className="h-5 w-5" />
                             </Button>
                         </form>
@@ -385,7 +355,6 @@ export default function Studio() {
                 </Card>
             </div>
 
-            {/* ── Satellite Analysis Results ── */}
             {satLoading && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                     className="flex flex-col items-center justify-center py-20 text-center px-6">
@@ -395,9 +364,9 @@ export default function Studio() {
                             <Satellite className="h-12 w-12 text-primary" />
                         </div>
                     </div>
-                    <div className="mt-6 text-lg font-semibold text-foreground">Fetching Sentinel-2 Imagery…</div>
+                    <div className="mt-6 text-lg font-semibold text-foreground">Fetching Sentinel-2 Imagery...</div>
                     <div className="mt-2 text-sm text-muted-foreground max-w-md">
-                        Downloading bands from Microsoft Planetary Computer, computing NDVI, NDWI, SCL quality assessment, and change detection. This typically takes 30–60 seconds.
+                        Downloading bands from Microsoft Planetary Computer, computing NDVI, NDWI, SCL quality assessment, and change detection. This typically takes 30-60 seconds.
                     </div>
                     <div className="mt-4 flex gap-3 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1"><Leaf className="h-3 w-3 text-green-400" /> NDVI</span>
@@ -428,10 +397,10 @@ export default function Studio() {
                             <div className="flex items-center gap-3 text-sm text-muted-foreground mt-0.5">
                                 <span className="font-mono">{satResult.lat.toFixed(4)}, {satResult.lon.toFixed(4)}</span>
                                 {satResult.scene_date && (
-                                    <><span>·</span><span className="font-mono text-primary">{satResult.scene_date}</span></>
+                                    <><span>•</span><span className="font-mono text-primary">{satResult.scene_date}</span></>
                                 )}
                                 {satResult.sentinel_scene_count > 0 && (
-                                    <><span>·</span><span>{satResult.sentinel_scene_count} scenes</span></>
+                                    <><span>•</span><span>{satResult.sentinel_scene_count} scenes</span></>
                                 )}
                                 {satResult.cloud_cover_pct != null && (
                                     <span className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg px-2 py-0.5 text-xs">
@@ -499,21 +468,21 @@ export default function Studio() {
                                         className="w-full h-auto max-h-[500px] object-contain" />
                                     <div className="absolute top-3 left-3 bg-black/70 px-3 py-1.5 rounded-lg border border-primary/40 backdrop-blur-md text-primary text-xs font-mono flex items-center gap-1.5">
                                         <Crosshair className="h-3 w-3" />
-                                        {activeView === "ndvi" ? "NDVI — VEGETATION HEALTH" : activeView === "ndwi" ? "NDWI — WATER INDEX" : `SENTINEL-2 — ${satResult.scene_date || ""}`}
+                                        {activeView === "ndvi" ? "NDVI - VEGETATION HEALTH" : activeView === "ndwi" ? "NDWI - WATER INDEX" : `SENTINEL-2 - ${satResult.scene_date || ""}`}
                                     </div>
                                     {activeView === "ndvi" && (
                                         <div className="absolute bottom-3 right-3 bg-black/70 backdrop-blur-md rounded-lg border border-white/10 px-3 py-2 text-[10px] text-muted-foreground space-y-0.5">
                                             <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-red-600" /> &lt; 0.0 Bare/Water</div>
-                                            <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-yellow-500" /> 0.0–0.3 Low Veg</div>
-                                            <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-green-500" /> 0.3–0.6 Moderate</div>
+                                            <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-yellow-500" /> 0.0-0.3 Low Veg</div>
+                                            <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-green-500" /> 0.3-0.6 Moderate</div>
                                             <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-green-800" /> &gt; 0.6 Dense Veg</div>
                                         </div>
                                     )}
                                     {activeView === "ndwi" && (
                                         <div className="absolute bottom-3 right-3 bg-black/70 backdrop-blur-md rounded-lg border border-white/10 px-3 py-2 text-[10px] text-muted-foreground space-y-0.5">
                                             <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-red-500" /> &lt; -0.3 Dry Land</div>
-                                            <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-yellow-300" /> -0.3–0 Transition</div>
-                                            <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-blue-400" /> 0–0.3 Water Edge</div>
+                                            <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-yellow-300" /> -0.3-0 Transition</div>
+                                            <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-blue-400" /> 0-0.3 Water Edge</div>
                                             <div className="flex items-center gap-2"><div className="w-3 h-2 rounded-sm bg-blue-700" /> &gt; 0.3 Water</div>
                                         </div>
                                     )}
@@ -534,16 +503,16 @@ export default function Studio() {
                             </h3>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                 <StatCard icon={Leaf} label="NDVI Mean" color="text-green-400"
-                                    value={satResult.ndvi_mean != null ? satResult.ndvi_mean.toFixed(3) : "—"}
+                                    value={satResult.ndvi_mean != null ? satResult.ndvi_mean.toFixed(3) : "-"}
                                     sub={satResult.ndvi_vegetation_pct != null ? `${satResult.ndvi_vegetation_pct.toFixed(0)}% vegetation` : undefined} />
                                 <StatCard icon={Droplets} label="NDWI Mean" color="text-blue-400"
-                                    value={satResult.ndwi_mean != null ? satResult.ndwi_mean.toFixed(3) : "—"}
+                                    value={satResult.ndwi_mean != null ? satResult.ndwi_mean.toFixed(3) : "-"}
                                     sub={satResult.water_coverage_pct != null ? `${satResult.water_coverage_pct.toFixed(1)}% water` : undefined} />
                                 <StatCard icon={Layers} label="Urban/Built-up" color="text-yellow-400"
-                                    value={satResult.ndvi_urban_pct != null ? `${satResult.ndvi_urban_pct.toFixed(0)}%` : "—"}
+                                    value={satResult.ndvi_urban_pct != null ? `${satResult.ndvi_urban_pct.toFixed(0)}%` : "-"}
                                     sub={satResult.settlement_density ? `Density: ${satResult.settlement_density}` : undefined} />
                                 <StatCard icon={CloudRain} label="Cloud Cover" color="text-blue-300"
-                                    value={satResult.cloud_cover_pct != null ? `${satResult.cloud_cover_pct.toFixed(1)}%` : "—"}
+                                    value={satResult.cloud_cover_pct != null ? `${satResult.cloud_cover_pct.toFixed(1)}%` : "-"}
                                     sub={satResult.scene_date ? `Scene: ${satResult.scene_date}` : undefined} />
                             </div>
                         </section>
@@ -588,7 +557,7 @@ export default function Studio() {
                                         {satResult.ndvi_change.delta_mean < 0
                                             ? <TrendingDown className="h-4 w-4 text-red-400" />
                                             : <TrendingUp className="h-4 w-4 text-green-400" />}
-                                        Change Detection (ΔNDVI)
+                                        Change Detection (dNDVI)
                                     </h3>
                                     <div className="bg-white/5 border border-white/10 rounded-xl p-5 space-y-4">
                                         <div className="text-xs text-muted-foreground">
@@ -598,7 +567,7 @@ export default function Studio() {
                                             <div className={`text-4xl font-bold font-mono ${satResult.ndvi_change.delta_mean < 0 ? "text-red-400" : "text-green-400"}`}>
                                                 {satResult.ndvi_change.delta_mean > 0 ? "+" : ""}{satResult.ndvi_change.delta_mean.toFixed(4)}
                                             </div>
-                                            <div className="text-xs text-muted-foreground mt-1">Mean ΔNDVI</div>
+                                            <div className="text-xs text-muted-foreground mt-1">Mean dNDVI</div>
                                         </div>
                                         <div className="grid grid-cols-2 gap-3">
                                             <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-center">

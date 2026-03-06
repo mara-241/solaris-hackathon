@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react"
-import { useParams, useNavigate } from "react-router-dom"
+import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { motion } from "framer-motion"
-import Map, { Marker } from "react-map-gl/maplibre"
-import maplibregl from "maplibre-gl"
-import "maplibre-gl/dist/maplibre-gl.css"
+import Map, { Marker } from "react-map-gl"
+import mapboxgl from "mapbox-gl"
+import "mapbox-gl/dist/mapbox-gl.css"
 import {
     ArrowLeft, Satellite, Battery, Zap, Activity, Crosshair,
     Leaf, Droplets, TrendingDown, TrendingUp, BarChart2,
     RefreshCw, Clock, Shield, CloudRain, Sun, Users, Globe,
-    AlertTriangle, CheckCircle, XCircle, ChevronRight,
+    AlertTriangle, CheckCircle, XCircle,
     Gauge, DollarSign, Wind, MapPin
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -19,11 +19,100 @@ import {
 } from "recharts"
 
 const API = "http://localhost:8000"
-const MAP_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
+const MAP_STYLE = "mapbox://styles/mapbox/streets-v12"
+const MAP_VISUAL_FILTER = "brightness(0.85) saturate(0.86) contrast(0.95)"
+
+function apply3DMapEnhancements(map: any) {
+    if (!map || typeof map.getStyle !== "function") return
+
+    try {
+        if (typeof map.setProjection === "function") {
+            map.setProjection("globe")
+        }
+
+        if (typeof map.setFog === "function") {
+            map.setFog({
+                range: [-1, 2],
+                color: "rgb(90, 103, 119)",
+                "high-color": "rgb(44, 52, 67)",
+                "horizon-blend": 0.25,
+                "space-color": "rgb(7, 10, 16)",
+                "star-intensity": 0.05,
+            })
+        }
+
+        if (!map.getSource("mapbox-dem")) {
+            map.addSource("mapbox-dem", {
+                type: "raster-dem",
+                url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+                tileSize: 512,
+                maxzoom: 14,
+            })
+        }
+        map.setTerrain({ source: "mapbox-dem", exaggeration: 1.2 })
+
+        if (!map.getLayer("sky")) {
+            map.addLayer({
+                id: "sky",
+                type: "sky",
+                paint: {
+                    "sky-type": "atmosphere",
+                    "sky-atmosphere-sun": [0.0, 0.0],
+                    "sky-atmosphere-sun-intensity": 15,
+                },
+            })
+        }
+
+        if (!map.getLayer("3d-buildings")) {
+            const layers = map.getStyle()?.layers || []
+            const labelLayerId = layers.find((layer: any) => {
+                return layer.type === "symbol" && layer.layout && layer.layout["text-field"]
+            })?.id
+
+            map.addLayer(
+                {
+                    id: "3d-buildings",
+                    source: "composite",
+                    "source-layer": "building",
+                    filter: ["==", "extrude", "true"],
+                    type: "fill-extrusion",
+                    minzoom: 14,
+                    paint: {
+                        "fill-extrusion-color": "#475569",
+                        "fill-extrusion-height": ["get", "height"],
+                        "fill-extrusion-base": ["coalesce", ["get", "min_height"], 0],
+                        "fill-extrusion-opacity": 0.58,
+                    },
+                },
+                labelLayerId
+            )
+        }
+    } catch {
+        // Ignore style timing issues.
+    }
+}
 
 interface LocationData {
     loc_id: string; name: string; lat: number; lon: number
     households: number; latest_run_id: string | null
+}
+
+function toNum(value: any): number | null {
+    const n = typeof value === "number" ? value : Number(value)
+    return Number.isFinite(n) ? n : null
+}
+
+function formatNumberOrNA(value: any, suffix = "", digits = 0): string {
+    const n = toNum(value)
+    if (n == null || n <= 0) return "N/A"
+    return `${n.toFixed(digits)}${suffix}`
+}
+
+function formatMoneyOrNA(value: any): string {
+    const n = toNum(value)
+    if (n == null || n <= 0) return "N/A"
+    return `$${Math.round(n).toLocaleString()}`
 }
 
 function ConfidenceBadge({ value }: { value: number }) {
@@ -77,6 +166,7 @@ function StepTrace({ steps }: { steps: any[] }) {
 export default function LocationDetail() {
     const { locId } = useParams<{ locId: string }>()
     const navigate = useNavigate()
+    const [searchParams, setSearchParams] = useSearchParams()
     const [loc, setLoc] = useState<LocationData | null>(null)
     const [run, setRun] = useState<any>(null)
     const [satData, setSatData] = useState<any>(null)
@@ -126,8 +216,13 @@ export default function LocationDetail() {
     const agentSteps = run?.runtime?.agent_steps || []
     const runtimeErrors = run?.runtime?.errors || []
     const guardrail = outputs.guardrail || {}
-    const spatialInsights = outputs.optimization_result?.spatial_insights || outputs.spatial_insights || {}
-
+    const planningOnly = searchParams.get("tab") === "planning"
+    const setPlanningMode = (enabled: boolean) => {
+        const next = new URLSearchParams(searchParams)
+        if (enabled) next.set("tab", "planning")
+        else next.delete("tab")
+        setSearchParams(next, { replace: true })
+    }
     // Demand forecast chart data
     const demandChart = demand ? [
         { name: "Lower CI", kwh: demand.lower_ci, fill: "rgba(59,130,246,0.3)" },
@@ -158,11 +253,20 @@ export default function LocationDetail() {
                                 <><span>•</span><ConfidenceBadge value={quality.confidence} /></>
                             )}
                         </div>
+                    </div>                    <div className="flex items-center gap-2">
+                        <Button
+                            variant={planningOnly ? "default" : "outline"}
+                            className="h-10"
+                            onClick={() => setPlanningMode(!planningOnly)}
+                        >
+                            <Clock className="mr-2 h-4 w-4" />
+                            {planningOnly ? "Full Analysis" : "Planning Only"}
+                        </Button>
+                        <Button variant="outline" className="h-10" onClick={handleReanalyze} disabled={reanalyzing}>
+                            <RefreshCw className={`mr-2 h-4 w-4 ${reanalyzing ? "animate-spin" : ""}`} />
+                            {reanalyzing ? "Analyzing..." : "Re-analyze"}
+                        </Button>
                     </div>
-                    <Button variant="outline" className="h-10" onClick={handleReanalyze} disabled={reanalyzing}>
-                        <RefreshCw className={`mr-2 h-4 w-4 ${reanalyzing ? "animate-spin" : ""}`} />
-                        {reanalyzing ? "Analyzing…" : "Re-analyze"}
-                    </Button>
                 </div>
             </div>
 
@@ -171,6 +275,8 @@ export default function LocationDetail() {
                 <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
 
                     {/* ── Location Map ────────────────────────────────── */}
+                    {!planningOnly && (
+                        <>
                     <section>
                         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
                             <MapPin className="h-4 w-4 text-primary" /> Site Location
@@ -180,11 +286,17 @@ export default function LocationDetail() {
                                 initialViewState={{
                                     longitude: loc.lon,
                                     latitude: loc.lat,
-                                    zoom: 12
+                                    zoom: 12,
+                                    pitch: 54,
+                                    bearing: -18,
                                 }}
+                                onLoad={(evt: any) => apply3DMapEnhancements(evt.target)}
+                                onStyleData={(evt: any) => apply3DMapEnhancements(evt.target)}
+                                projection={{ name: "globe" }}
                                 mapStyle={MAP_STYLE}
-                                mapLib={maplibregl as any}
-                                style={{ width: "100%", height: "100%" }}
+                                mapboxAccessToken={MAPBOX_TOKEN}
+                                mapLib={mapboxgl as any}
+                                style={{ width: "100%", height: "100%", filter: MAP_VISUAL_FILTER }}
                                 interactive={true}
                             >
                                 <Marker longitude={loc.lon} latitude={loc.lat} anchor="center">
@@ -214,16 +326,16 @@ export default function LocationDetail() {
                         </h2>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <MetricCard icon={Wind} label="CO₂ Avoided" color="text-green-400"
-                                value={`${(impact.co2_avoided_tons_estimate || 0).toFixed(1)}t`}
+                                value={formatNumberOrNA(impact.co2_avoided_tons_estimate, "t", 1)}
                                 sub="Tons/year estimate" />
                             <MetricCard icon={DollarSign} label="Cost Savings" color="text-emerald-400"
-                                value={`$${(impact.annual_cost_savings_usd_estimate || 0).toLocaleString()}`}
+                                value={formatMoneyOrNA(impact.annual_cost_savings_usd_estimate)}
                                 sub="Annual estimate" />
                             <MetricCard icon={Users} label="Households Served" color="text-blue-400"
                                 value={`${impact.households_served_estimate || loc.households}`}
                                 sub={`Confidence: ${impact.confidence_band || "—"}`} />
                             <MetricCard icon={Activity} label="Efficiency Gain" color="text-purple-400"
-                                value={`${(impact.estimated_efficiency_gain_pct || 0).toFixed(1)}%`}
+                                value={formatNumberOrNA(impact.estimated_efficiency_gain_pct, "%", 1)}
                                 sub="vs baseline diesel/kerosene" />
                         </div>
                     </section>
@@ -281,17 +393,17 @@ export default function LocationDetail() {
                                     <div className="grid grid-cols-3 gap-3">
                                         <div className="bg-primary/10 border border-primary/20 rounded-xl p-4 text-center">
                                             <Zap className="h-5 w-5 text-primary mx-auto mb-2" />
-                                            <div className="text-2xl font-bold">{plan.pv_kw}</div>
+                                            <div className="text-2xl font-bold">{formatNumberOrNA(plan.pv_kw, "", 1)}</div>
                                             <div className="text-xs text-muted-foreground">kW PV Array</div>
                                         </div>
                                         <div className="bg-secondary/10 border border-secondary/20 rounded-xl p-4 text-center">
                                             <Battery className="h-5 w-5 text-secondary mx-auto mb-2" />
-                                            <div className="text-2xl font-bold">{plan.battery_kwh}</div>
+                                            <div className="text-2xl font-bold">{formatNumberOrNA(plan.battery_kwh, "", 1)}</div>
                                             <div className="text-xs text-muted-foreground">kWh Battery</div>
                                         </div>
                                         <div className="bg-accent/10 border border-accent/20 rounded-xl p-4 text-center">
                                             <Sun className="h-5 w-5 text-accent mx-auto mb-2" />
-                                            <div className="text-2xl font-bold">{plan.solar_kits}</div>
+                                            <div className="text-2xl font-bold">{formatNumberOrNA(plan.solar_kits, "", 0)}</div>
                                             <div className="text-xs text-muted-foreground">Solar Kits</div>
                                         </div>
                                     </div>
@@ -405,13 +517,13 @@ export default function LocationDetail() {
                                                 {satData.ndvi_image && (
                                                     <button onClick={() => setSatView("ndvi")}
                                                         className={`flex-1 text-xs py-1.5 px-2 rounded border transition-all ${satView === "ndvi" ? "border-green-400/60 bg-green-400/20 text-green-400" : "border-white/10 bg-white/5 text-muted-foreground hover:border-white/30"}`}>
-                                                        NDVI Map
+                                                        NDVI Image
                                                     </button>
                                                 )}
                                                 {satData.ndwi_image && (
                                                     <button onClick={() => setSatView("ndwi")}
                                                         className={`flex-1 text-xs py-1.5 px-2 rounded border transition-all ${satView === "ndwi" ? "border-blue-400/60 bg-blue-400/20 text-blue-400" : "border-white/10 bg-white/5 text-muted-foreground hover:border-white/30"}`}>
-                                                        NDWI Map
+                                                        NDWI Image
                                                     </button>
                                                 )}
                                             </div>
@@ -541,21 +653,91 @@ export default function LocationDetail() {
                             </Card>
                         </section>
                     )}
+                        </>
+                    )}
 
-                    {/* ── Deployment Timeline ────────────────────────── */}
+                    {/* Deployment Planning */}
                     {timeline.length > 0 && (
                         <section>
                             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
-                                <Clock className="h-4 w-4 text-primary" /> Deployment Timeline
+                                <Clock className="h-4 w-4 text-primary" /> Deployment Planning
                             </h2>
-                            <div className="relative pl-4 border-l-2 border-primary/30 space-y-6 ml-3">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                                <MetricCard
+                                    icon={Users}
+                                    label="Target Households"
+                                    value={`${loc.households}`}
+                                    sub={planningOnly ? "Planning mode active" : "Current saved target"}
+                                    color="text-blue-400"
+                                />
+                                <MetricCard
+                                    icon={Zap}
+                                    label="PV Capacity"
+                                    value={formatNumberOrNA(plan?.pv_kw, " kW", 1)}
+                                    sub="Primary scenario"
+                                    color="text-primary"
+                                />
+                                <MetricCard
+                                    icon={Battery}
+                                    label="Battery"
+                                    value={formatNumberOrNA(plan?.battery_kwh, " kWh", 1)}
+                                    sub="Primary scenario"
+                                    color="text-secondary"
+                                />
+                                <MetricCard
+                                    icon={Clock}
+                                    label="Phases"
+                                    value={`${timeline.length}`}
+                                    sub="Execution milestones"
+                                    color="text-emerald-300"
+                                />
+                            </div>
+
+                            <div className="space-y-4">
                                 {timeline.map((step: any, i: number) => (
-                                    <motion.div key={i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
-                                        transition={{ delay: i * 0.08 }} className="relative">
-                                        <div className="absolute -left-[21px] top-1 h-3 w-3 rounded-full bg-background border-2 border-primary box-content" />
-                                        <div className="mb-1 text-sm font-semibold text-foreground">{step.milestone}</div>
-                                        <div className="text-xs text-muted-foreground font-mono bg-white/5 py-1 px-2 rounded inline-block">ETA: {step.date}</div>
-                                        {step.note && <div className="text-xs text-muted-foreground mt-1 opacity-70">{step.note}</div>}
+                                    <motion.div
+                                        key={i}
+                                        initial={{ opacity: 0, x: -10 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: i * 0.05 }}
+                                        className="rounded-xl border border-white/10 bg-white/5 p-4"
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <div className="text-sm font-semibold text-foreground">{step.milestone}</div>
+                                                <div className="mt-1 text-xs text-muted-foreground font-mono">
+                                                    {step.start_date ? `${step.start_date} → ` : ""}
+                                                    {step.end_date || step.date}
+                                                    {step.duration_days ? ` (${step.duration_days}d)` : ""}
+                                                </div>
+                                            </div>
+                                            {step.owner && (
+                                                <span className="text-[10px] font-semibold uppercase tracking-wider border border-primary/30 text-primary bg-primary/10 rounded-full px-2 py-1">
+                                                    {step.owner}
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {step.note && <div className="text-xs text-muted-foreground mt-3">{step.note}</div>}
+
+                                        {Array.isArray(step.deliverables) && step.deliverables.length > 0 && (
+                                            <div className="mt-3">
+                                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Deliverables</div>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {step.deliverables.slice(0, 4).map((item: string, idx: number) => (
+                                                        <span key={idx} className="text-[10px] border border-white/15 rounded-full px-2 py-1 text-foreground/90 bg-white/5">
+                                                            {item}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {Array.isArray(step.risk_controls) && step.risk_controls.length > 0 && (
+                                            <div className="mt-3 text-[11px] text-amber-200/90">
+                                                Risk controls: {step.risk_controls.join(" • ")}
+                                            </div>
+                                        )}
                                     </motion.div>
                                 ))}
                             </div>
@@ -569,3 +751,9 @@ export default function LocationDetail() {
         </div>
     )
 }
+
+
+
+
+
+

@@ -1,7 +1,12 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+import json
 import logging
 import os
+import re
 import urllib.parse
+import urllib.request
+import uuid
 
 # Configure logging
 logging.basicConfig(
@@ -54,6 +59,359 @@ def _require_auth(x_api_key: str | None) -> None:
         return
     if not x_api_key or x_api_key != API_AUTH_TOKEN:
         raise HTTPException(status_code=401, detail="unauthorized")
+
+
+ENERGY_INTENT_TERMS = (
+    "energy",
+    "power",
+    "solar",
+    "demand",
+    "usage",
+    "load",
+    "forecast",
+    "optimiz",
+    "size",
+)
+
+ENERGY_ACTION_TERMS = (
+    "analy",
+    "plan",
+    "generate",
+    "run",
+    "estimate",
+    "calculate",
+    "design",
+)
+
+LOCATION_PHRASE_PATTERNS = [
+    re.compile(r"\b(?:for|in|at|near)\s+([A-Za-z][A-Za-z0-9\s,.'()\-]{2,100})", re.IGNORECASE),
+    re.compile(r"\b(?:location|site)\s*(?:is|:)\s*([A-Za-z][A-Za-z0-9\s,.'()\-]{2,100})", re.IGNORECASE),
+]
+
+COORD_PAIR_PATTERN = re.compile(
+    r"(?P<lat>-?\d{1,2}(?:\.\d+)?)\s*[, ]\s*(?P<lon>-?\d{1,3}(?:\.\d+)?)"
+)
+
+HOUSEHOLDS_PATTERN = re.compile(
+    r"(?P<count>\d{1,7})\s*(?:households?|houses?|homes?|hh|housholds?|houshols?|househols?|famil(?:y|ies)|users?|people)\b",
+    re.IGNORECASE,
+)
+PROJECT_NAME_PATTERNS = [
+    re.compile(r'\bproject\s*name\s*(?:is|=|:)?\s*["\'](?P<name>[^"\']{2,120})["\']', re.IGNORECASE),
+    re.compile(r'\b(?:name|call)\s+(?:the\s+)?(?:project|analysis)\s*["\'](?P<name>[^"\']{2,120})["\']', re.IGNORECASE),
+    re.compile(r"\bproject\s*name\s*(?:is|=|:)?\s*(?P<name>[A-Za-z0-9][A-Za-z0-9_.\-\s]{1,80})$", re.IGNORECASE),
+]
+
+
+def _is_valid_lat_lon(lat: float, lon: float) -> bool:
+    return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0
+
+
+def _is_zero_coord_pair(lat: float, lon: float) -> bool:
+    return abs(lat) < 1e-9 and abs(lon) < 1e-9
+
+
+def _looks_like_energy_analysis_request(message: str) -> bool:
+    text = message.lower()
+    has_domain = any(term in text for term in ENERGY_INTENT_TERMS)
+    has_action = any(term in text for term in ENERGY_ACTION_TERMS)
+    has_usage_phrase = ("energy usage" in text) or ("power usage" in text)
+    return has_domain and (has_action or has_usage_phrase)
+
+
+def _extract_households_hint(message: str) -> int | None:
+    match = HOUSEHOLDS_PATTERN.search(message)
+    if not match:
+        return None
+    try:
+        value = int(match.group("count"))
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _extract_project_name_hint(message: str) -> str | None:
+    for pattern in PROJECT_NAME_PATTERNS:
+        match = pattern.search(message)
+        if not match:
+            continue
+        value = match.group("name").strip(" \t\r\n,.;:!?")
+        if len(value) >= 2:
+            return value
+    return None
+
+
+def _extract_coords_from_text(message: str) -> tuple[float, float] | None:
+    for match in COORD_PAIR_PATTERN.finditer(message):
+        try:
+            lat = float(match.group("lat"))
+            lon = float(match.group("lon"))
+        except ValueError:
+            continue
+        if _is_valid_lat_lon(lat, lon):
+            return lat, lon
+    return None
+
+
+def _clean_location_phrase(raw_location: str) -> str:
+    value = raw_location.strip(" \t\r\n,.;:!?")
+    value = re.split(
+        r"\b(?:with|using|coordinates?|latitude|longitude|lat|lon|households?|houses?|homes?|famil(?:y|ies)|people|users?|forecast|energy|power|save|project|name|called|title)\b",
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    # Strip trailing quantity phrases left after unit words are removed.
+    value = re.sub(r"\bfor\s+\d+(?:\.\d+)?\s*$", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bfor\s+\d+(?:\.\d+)?\s+[A-Za-z]+\s*$", "", value, flags=re.IGNORECASE)
+    # Drop common leading determiners.
+    value = re.sub(r"^\s*(?:the)\s+", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\b(?:at|in|for|near)\s*$", "", value, flags=re.IGNORECASE)
+    return value.strip(" \t\r\n,.;:!?")
+
+
+def _extract_location_phrase(message: str) -> str | None:
+    for pattern in LOCATION_PHRASE_PATTERNS:
+        match = pattern.search(message)
+        if not match:
+            continue
+        cleaned = _clean_location_phrase(match.group(1))
+        if len(cleaned) >= 2:
+            return cleaned
+    return None
+
+
+def _nominatim_search(query: str, *, limit: int = 1) -> list[dict]:
+    if not query:
+        return []
+    try:
+        safe_limit = max(1, min(10, int(limit)))
+    except (TypeError, ValueError):
+        safe_limit = 1
+
+    try:
+        url = (
+            "https://nominatim.openstreetmap.org/search"
+            f"?q={urllib.parse.quote(query)}&format=json&limit={safe_limit}"
+        )
+        req_obj = urllib.request.Request(url, headers={"User-Agent": "Solaris-Agent/1.0"})
+        with urllib.request.urlopen(req_obj, timeout=10) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        logger.exception("nominatim search failed for query=%s", query)
+        return []
+
+    results: list[dict] = []
+    for item in payload or []:
+        try:
+            lat = float(item["lat"])
+            lon = float(item["lon"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not _is_valid_lat_lon(lat, lon):
+            continue
+        results.append(
+            {
+                "name": item.get("display_name") or query,
+                "lat": lat,
+                "lon": lon,
+            }
+        )
+    return results
+
+
+def _geocode_location_name(query: str) -> tuple[float, float, str] | None:
+    rows = _nominatim_search(query, limit=1)
+    if not rows:
+        return None
+    top = rows[0]
+    return float(top["lat"]), float(top["lon"]), str(top["name"])
+
+
+def _build_satellite_payload(run_data: dict, *, location_name: str, lat: float, lon: float) -> dict:
+    outputs = run_data.get("outputs", {})
+    feature_context = outputs.get("feature_context", {})
+    spatial = feature_context.get("spatial", {}) or outputs.get("spatial", {})
+    feature_summaries = spatial.get("feature_summaries", {})
+    optimization = outputs.get("optimization_result", {})
+    spatial_insights = outputs.get("spatial_insights") or optimization.get("spatial_insights") or {}
+
+    preview_url = feature_summaries.get("preview_url") or spatial_insights.get("preview_url")
+    return {
+        "location_name": location_name,
+        "lat": lat,
+        "lon": lon,
+        "preview_url": preview_url,
+        "scene_date": feature_summaries.get("scene_date"),
+        "cloud_cover_pct": feature_summaries.get("cloud_cover_pct"),
+        "ndvi_mean": feature_summaries.get("ndvi_mean"),
+        "ndwi_mean": feature_summaries.get("ndwi_mean"),
+        "ndvi_vegetation_pct": feature_summaries.get("ndvi_vegetation_pct"),
+        "ndvi_urban_pct": feature_summaries.get("ndvi_urban_pct"),
+        "water_coverage_pct": feature_summaries.get("water_coverage_pct"),
+        "settlement_density": feature_summaries.get("settlement_density"),
+        "land_cover_summary": feature_summaries.get("land_cover_summary", []),
+        "scl_quality": feature_summaries.get("scl_quality"),
+        "ndvi_change": feature_summaries.get("ndvi_change"),
+        "sentinel_scene_count": feature_summaries.get("sentinel_scene_count", 0),
+        "ndvi_image": feature_summaries.get("ndvi_image"),
+        "ndwi_image": feature_summaries.get("ndwi_image"),
+        "quality_flags": spatial.get("quality_flags", []),
+        "error": feature_summaries.get("error"),
+        "data_unavailable": feature_summaries.get("ndvi_mean") is None,
+    }
+
+
+def _upsert_location_for_run(name: str, lat: float, lon: float, households: int, run_id: str) -> str:
+    norm_name = name.strip().lower()
+    existing = None
+    for loc in store.get_locations():
+        loc_name = str(loc.get("name", "")).strip().lower()
+        if loc_name and loc_name == norm_name:
+            existing = loc
+            break
+        if abs(float(loc.get("lat", 9999.0)) - lat) < 1e-5 and abs(float(loc.get("lon", 9999.0)) - lon) < 1e-5:
+            existing = loc
+            break
+
+    if existing:
+        loc_id = str(existing["loc_id"])
+        store.save_location(loc_id, name, lat, lon, households, run_id)
+        return loc_id
+
+    loc_id = str(uuid.uuid4())
+    store.save_location(loc_id, name, lat, lon, households, run_id)
+    return loc_id
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _build_pipeline_result_from_graph(req: "ChatRequest", final_state: dict) -> dict | None:
+    """
+    Convert LangGraph tool outputs into the deterministic pipeline result shape
+    so it can be persisted and surfaced by dashboard endpoints.
+    """
+    energy = final_state.get("energy_result")
+    spatial = final_state.get("spatial_result")
+    perception = final_state.get("perception_result")
+    evidence = final_state.get("evidence_result")
+    completed_steps = final_state.get("completed_steps", [])
+
+    # Only persist pipeline-shaped runs when analysis workflow was actually triggered.
+    analysis_steps = {
+        "run_energy_analysis",
+        "perception_data",
+        "spatial_analysis",
+        "satellite_imagery",
+        "energy_optimization",
+        "evidence_pack",
+    }
+    if not any(step in analysis_steps for step in (completed_steps or [])):
+        return None
+
+    if not isinstance(energy, dict):
+        energy = {}
+    demand_forecast = energy.get("demand_forecast") if isinstance(energy.get("demand_forecast"), dict) else {}
+    scenario_set = energy.get("scenario_set") if isinstance(energy.get("scenario_set"), dict) else {}
+    optimization_result = energy.get("optimization_result") if isinstance(energy.get("optimization_result"), dict) else {}
+    model_metadata = energy.get("model_metadata") if isinstance(energy.get("model_metadata"), dict) else {}
+    impact_metrics = energy.get("impact_metrics") if isinstance(energy.get("impact_metrics"), dict) else {}
+
+    graph_req = final_state.get("request", {}) if isinstance(final_state.get("request"), dict) else {}
+    lat = graph_req.get("lat", req.lat if req.lat is not None else 0.0)
+    lon = graph_req.get("lon", req.lon if req.lon is not None else 0.0)
+    households = graph_req.get("households", req.households or 100)
+    run_id = req.thread_id or str(uuid.uuid4())
+
+    energy_status = str(energy.get("status", "degraded")).lower()
+    if energy_status not in {"ok", "degraded", "failed"}:
+        energy_status = "degraded"
+    if final_state.get("errors"):
+        if energy_status == "ok":
+            energy_status = "degraded"
+
+    confidence = energy.get("confidence", 0.35)
+    try:
+        confidence = float(confidence)
+    except (TypeError, ValueError):
+        confidence = 0.35
+
+    step_durations = final_state.get("step_durations_ms", {})
+    if not isinstance(step_durations, dict):
+        step_durations = {}
+    raw_errors = final_state.get("errors", []) if isinstance(final_state.get("errors"), list) else []
+    error_steps = set()
+    for err in raw_errors:
+        if isinstance(err, str) and ":" in err:
+            error_steps.add(err.split(":", 1)[0].strip())
+
+    runtime_steps = []
+    if isinstance(completed_steps, list):
+        for step in completed_steps:
+            step_name = str(step)
+            duration_val = step_durations.get(step_name, 0.0)
+            try:
+                duration_ms = max(1.0, float(duration_val))
+            except (TypeError, ValueError):
+                duration_ms = 1.0
+            runtime_steps.append(
+                {
+                    "step": step_name,
+                    "status": "failed" if step_name in error_steps else "ok",
+                    "duration_ms": duration_ms,
+                }
+            )
+
+    total_duration_ms = final_state.get("total_duration_ms", 0.0)
+    try:
+        total_duration_ms = max(1.0, float(total_duration_ms))
+    except (TypeError, ValueError):
+        total_duration_ms = sum(float(s.get("duration_ms", 0.0) or 0.0) for s in runtime_steps) or 1.0
+
+    pipeline_result = {
+        "run_id": run_id,
+        "created_at": _utc_now_iso(),
+        "request": {
+            "request_id": run_id,
+            "lat": lat,
+            "lon": lon,
+            "households": households,
+            "horizon_days": req.horizon_days,
+            "usage_profile": req.usage_profile,
+        },
+        "outputs": {
+            "feature_context": {
+                "status": energy_status,
+                "confidence": confidence,
+                "assumptions": energy.get("assumptions", []) if isinstance(energy.get("assumptions"), list) else [],
+                "quality_flags": energy.get("quality_flags", []) if isinstance(energy.get("quality_flags"), list) else [],
+                "run_id": run_id,
+                "perception": perception if isinstance(perception, dict) else {},
+                "spatial": spatial if isinstance(spatial, dict) else {},
+            },
+            "demand_forecast": demand_forecast if demand_forecast else {},
+            "scenario_set": scenario_set if scenario_set else {},
+            "optimization_result": optimization_result if optimization_result else {},
+            "model_metadata": model_metadata,
+            "impact_metrics": impact_metrics,
+            "provenance": evidence.get("provenance", {}) if isinstance(evidence, dict) else {},
+            "quality": {
+                "status": energy_status,
+                "confidence": confidence,
+                "fallback_used": (spatial or {}).get("fallback_used", True) if isinstance(spatial, dict) else True,
+            },
+        },
+        "evidence_pack": evidence if isinstance(evidence, dict) else {},
+        "runtime": {
+            "status": energy_status,
+            "errors": final_state.get("errors", []) if isinstance(final_state.get("errors"), list) else [],
+            "agent_steps": runtime_steps,
+            "total_duration_ms": total_duration_ms,
+        },
+    }
+    return pipeline_result
 
 
 @app.get("/health")
@@ -138,8 +496,6 @@ def openclaw_execute(
     """
     _require_auth(x_api_key)
     
-    import uuid
-    from apps.api.main import RunRequest
     internal_req = RunRequest(
         request_id=req.thread_id or str(uuid.uuid4()),
         lat=req.lat,
@@ -165,6 +521,67 @@ class ChatRequest(BaseModel):
     horizon_days: int = 30
     usage_profile: str | None = None
     thread_id: str | None = None
+    history: list[dict] | None = None
+
+
+def _resolve_chat_target(req: ChatRequest) -> dict | None:
+    """
+    Resolve chat coordinates even when the message is not an explicit analysis
+    command. This prevents accidental (0, 0) satellite requests.
+    """
+    location_name = _extract_location_phrase(req.message)
+
+    if req.lat is not None and req.lon is not None:
+        if _is_valid_lat_lon(req.lat, req.lon) and not _is_zero_coord_pair(req.lat, req.lon):
+            return {
+                "lat": float(req.lat),
+                "lon": float(req.lon),
+                "location_name": location_name or f"{req.lat:.4f}, {req.lon:.4f}",
+                "source": "request_coords",
+            }
+
+    coord_pair = _extract_coords_from_text(req.message)
+    if coord_pair:
+        lat, lon = coord_pair
+        return {
+            "lat": lat,
+            "lon": lon,
+            "location_name": location_name or f"{lat:.4f}, {lon:.4f}",
+            "source": "message_coords",
+        }
+
+    if location_name:
+        geocoded = _geocode_location_name(location_name)
+        if geocoded:
+            lat, lon, resolved_name = geocoded
+            return {
+                "lat": lat,
+                "lon": lon,
+                "location_name": resolved_name,
+                "source": "geocode",
+            }
+
+    return None
+
+
+def _resolve_chat_analysis_target(req: ChatRequest) -> dict | None:
+    """
+    Decide whether chat input should trigger the deterministic pipeline and
+    resolve lat/lon/location name for that run.
+    """
+    if not _looks_like_energy_analysis_request(req.message):
+        return None
+
+    households = req.households or _extract_households_hint(req.message) or 100
+    project_name = _extract_project_name_hint(req.message)
+    target = _resolve_chat_target(req)
+    if not target:
+        return None
+    return {
+        **target,
+        "households": households,
+        "project_name": project_name or target["location_name"],
+    }
 
 
 @app.post("/api/chat")
@@ -176,43 +593,124 @@ def chat_agent(
     Execute the OpenClaw LangGraph agent via a chat interface.
     """
     _require_auth(x_api_key)
+    thread_id = req.thread_id or str(uuid.uuid4())
+    resolved_target = _resolve_chat_target(req)
+    project_name_hint = _extract_project_name_hint(req.message)
+    analysis_target = _resolve_chat_analysis_target(req)
+
     from agents.langgraph.graph import run_solaris_graph
-    import uuid
-    from langchain_core.messages import AIMessage
 
     try:
+        graph_target = analysis_target or resolved_target
+        graph_lat = graph_target["lat"] if graph_target else (req.lat if req.lat is not None else 0.0)
+        graph_lon = graph_target["lon"] if graph_target else (req.lon if req.lon is not None else 0.0)
+        graph_households = (
+            analysis_target["households"]
+            if analysis_target
+            else req.households or _extract_households_hint(req.message)
+        )
         final_state = run_solaris_graph(
             message=req.message,
-            lat=req.lat or 0.0,
-            lon=req.lon or 0.0,
-            households=req.households,
+            lat=graph_lat,
+            lon=graph_lon,
+            households=graph_households,
             horizon_days=req.horizon_days,
-            thread_id=req.thread_id or str(uuid.uuid4()),
+            thread_id=thread_id,
             usage_profile=req.usage_profile,
+            history=req.history,
         )
-        
-        # Format the response exactly as LangGraph's API would for the frontend UI
+
+        pipeline_result = _build_pipeline_result_from_graph(req, final_state)
+        run_id = None
+        loc_id = None
+        satellite = None
+
+        if pipeline_result:
+            store.save_run(pipeline_result)
+            run_id = pipeline_result["run_id"]
+            preq = pipeline_result.get("request", {})
+            lat = float(preq.get("lat", 0.0))
+            lon = float(preq.get("lon", 0.0))
+            households = int(preq.get("households", 100) or 100)
+            if _is_valid_lat_lon(lat, lon):
+                location_name = (
+                    str(analysis_target["project_name"])
+                    if analysis_target and analysis_target.get("project_name")
+                    else str(project_name_hint)
+                    if project_name_hint
+                    else str(resolved_target["location_name"])
+                    if resolved_target and resolved_target.get("location_name")
+                    else _extract_location_phrase(req.message) or f"{lat:.4f}, {lon:.4f}"
+                )
+                loc_id = _upsert_location_for_run(
+                    name=location_name,
+                    lat=lat,
+                    lon=lon,
+                    households=households,
+                    run_id=run_id,
+                )
+                satellite = _build_satellite_payload(
+                    pipeline_result,
+                    location_name=location_name,
+                    lat=lat,
+                    lon=lon,
+                )
+
         content = final_state.get("response", "Analysis complete.")
-        
-        # If the LLM successfully generated an energy plan, append a summary to the chat response
-        energy_plan = final_state.get("energy_plan")
-        if energy_plan and "demand_forecast" in energy_plan:
-            content += f"\n\n**Energy Plan Summary:**\n"
-            content += f"- **Daily Demand**: {energy_plan['demand_forecast']['kwh_per_day']} kWh\n"
-            if "scenario_set" in energy_plan and "primary" in energy_plan["scenario_set"]:
-                primary = energy_plan["scenario_set"]["primary"]
-                content += f"- **Recommended PV**: {primary.get('pv_kw')} kW\n"
-                content += f"- **Recommended Battery**: {primary.get('battery_kwh')} kWh\n"
-        
+        if run_id:
+            display_name = (
+                str(analysis_target["project_name"])
+                if analysis_target and analysis_target.get("project_name")
+                else str(project_name_hint)
+                if project_name_hint
+                else str(resolved_target["location_name"])
+                if resolved_target and resolved_target.get("location_name")
+                else "this location"
+            )
+            outputs = pipeline_result.get("outputs", {}) if isinstance(pipeline_result, dict) else {}
+            demand = outputs.get("demand_forecast", {}) if isinstance(outputs.get("demand_forecast"), dict) else {}
+            primary = (
+                outputs.get("scenario_set", {}).get("primary", {})
+                if isinstance(outputs.get("scenario_set"), dict)
+                else {}
+            )
+            try:
+                demand_kwh = float(demand.get("kwh_per_day")) if demand.get("kwh_per_day") is not None else None
+            except (TypeError, ValueError):
+                demand_kwh = None
+            try:
+                pv_kw = float(primary.get("pv_kw")) if primary.get("pv_kw") is not None else None
+            except (TypeError, ValueError):
+                pv_kw = None
+            try:
+                battery_kwh = float(primary.get("battery_kwh")) if primary.get("battery_kwh") is not None else None
+            except (TypeError, ValueError):
+                battery_kwh = None
+
+            if demand_kwh and pv_kw and battery_kwh:
+                content = (
+                    f"[SUCCESS] Summary: ~{demand_kwh:.0f} kWh/day load, "
+                    f"{pv_kw:.1f} kW PV, {battery_kwh:.1f} kWh battery. "
+                    f"Plan created and saved in Dashboard for {display_name}."
+                )
+            else:
+                content = f"[SUCCESS] Plan created and saved in Dashboard for {display_name}."
+
         return {
             "status": "completed",
             "messages": [
                 {
                     "type": "ai",
-                    "content": content
+                    "content": content,
                 }
             ],
-            "details": final_state
+            "details": final_state,
+            "run_id": run_id,
+            "loc_id": loc_id,
+            "satellite": satellite,
+            "thread_id": thread_id,
+            "mode": "langgraph",
+            "history": final_state.get("history", []),
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Agent execution failed: {exc}")
@@ -302,34 +800,12 @@ def get_location_satellite(loc_id: str, x_api_key: str | None = Header(default=N
     if not run_data:
         raise HTTPException(status_code=404, detail="run not found")
 
-    outputs = run_data.get("outputs", {})
-    # spatial lives inside feature_context in the pipeline output
-    feature_context = outputs.get("feature_context", {})
-    spatial = feature_context.get("spatial", {}) or outputs.get("spatial", {})
-    feature_summaries = spatial.get("feature_summaries", {})
-    optimization = outputs.get("optimization_result", {})
-    spatial_insights = outputs.get("spatial_insights") or optimization.get("spatial_insights") or {}
-
-    preview_url = feature_summaries.get("preview_url") or spatial_insights.get("preview_url")
-    return {
-        "preview_url": preview_url,
-        "scene_date": feature_summaries.get("scene_date"),
-        "cloud_cover_pct": feature_summaries.get("cloud_cover_pct"),
-        "ndvi_mean": feature_summaries.get("ndvi_mean"),
-        "ndwi_mean": feature_summaries.get("ndwi_mean"),
-        "ndvi_vegetation_pct": feature_summaries.get("ndvi_vegetation_pct"),
-        "ndvi_urban_pct": feature_summaries.get("ndvi_urban_pct"),
-        "water_coverage_pct": feature_summaries.get("water_coverage_pct"),
-        "settlement_density": feature_summaries.get("settlement_density"),
-        "land_cover_summary": feature_summaries.get("land_cover_summary", []),
-        "scl_quality": feature_summaries.get("scl_quality"),
-        "ndvi_change": feature_summaries.get("ndvi_change"),
-        "sentinel_scene_count": feature_summaries.get("sentinel_scene_count", 0),
-        "ndvi_image": feature_summaries.get("ndvi_image"),
-        "ndwi_image": feature_summaries.get("ndwi_image"),
-        "error": feature_summaries.get("error"),
-        "data_unavailable": feature_summaries.get("ndvi_mean") is None,
-    }
+    return _build_satellite_payload(
+        run_data,
+        location_name=loc["name"],
+        lat=loc["lat"],
+        lon=loc["lon"],
+    )
 
 
 @app.get("/api/dashboard/stats")
@@ -417,20 +893,18 @@ def satellite_search(req: SatelliteSearchRequest, x_api_key: str | None = Header
 
 @app.get("/api/geocode")
 def geocode(q: str):
-    """Geocode a location name to lat/lon using Geopy and Nominatim."""
-    from geopy.geocoders import Nominatim
-    geolocator = Nominatim(user_agent="solaris_ai_agent")
-    
-    # We can request multiple results by passing exactly_one=False (or limit)
-    locations = geolocator.geocode(q, exactly_one=False, limit=5)
-    
-    if not locations:
-        return []
+    """Geocode a location name to lat/lon using raw Nominatim HTTP."""
+    rows = _nominatim_search(q, limit=5)
+    if rows:
+        return rows
 
-    return [
-        {"name": loc.address, "lat": loc.latitude, "lon": loc.longitude}
-        for loc in locations
-    ]
+    cleaned = _clean_location_phrase(q)
+    if cleaned and cleaned.lower() != q.strip().lower():
+        rows = _nominatim_search(cleaned, limit=5)
+        if rows:
+            return rows
+
+    return []
 
 
 @app.get("/api/locations/{loc_id}/runs")
