@@ -163,42 +163,44 @@ def optimize_energy_plan(feature_context: dict) -> dict:
     timeline = []
     if flood_risk_factor > 1.1 or water_pct > 10:
         timeline.append({
-            "milestone": "Flood Risk Assessment & Site Elevation Survey",
+            "milestone": f"Hydro-Spatial Risk Assessment & Base Station Elevation",
             "date": (now + timedelta(days=7)).strftime("%Y-%m-%d"),
             "status": "pending",
-            "note": f"Water coverage {water_pct:.1f}% detected via Sentinel-2 NDWI"
+            "note": f"Critical NDWI water coverage of {water_pct:.1f}% detected. Proposing minimum rack elevation of 1.5m above ground level."
         })
     if veg_loss > 20:
         timeline.append({
-            "milestone": "Vegetation Loss Investigation",
+            "milestone": "Ecological Stress & Substrate Stability Analysis",
             "date": (now + timedelta(days=7)).strftime("%Y-%m-%d"),
             "status": "pending",
-            "note": f"{veg_loss:.0f}% vegetation loss detected in last 90 days"
+            "note": f"Severe vegetation loss ({veg_loss:.0f}%) recorded. Verifying topsoil integrity prior to trenching."
         })
+    
+    land_cover_str = '; '.join(land_cover[:2]) if land_cover else 'Mixed terrain'
     timeline += [
         {
-            "milestone": "Site Preparation & Ground Survey",
+            "milestone": f"Spatial Grading & Topographical Leveling for {density.title()} Density Profile",
             "date": (now + timedelta(days=prep_days)).strftime("%Y-%m-%d"),
             "status": "pending",
-            "note": f"Settlement density: {density}. {'; '.join(land_cover[:2]) if land_cover else ''}"
+            "note": f"Executing LiDAR-assisted ground clearing for {pv_kw}kW structural footprint. Mitigating {(shading_penalty * 100):.1f}% vegetative shading risk. Primary land cover interference: {land_cover_str}."
         },
         {
-            "milestone": "Procurement & Equipment Transit",
+            "milestone": f"Supply Chain Routing & Hardware Transit (Class {'A Heavy-Lift' if scale == 'large' else 'B Logistics'})",
             "date": (now + timedelta(days=procurement_days)).strftime("%Y-%m-%d"),
             "status": "pending",
-            "note": f"{pv_kw:.1f} kW PV array + {battery_kwh:.1f} kWh battery storage"
+            "note": f"Procuring {pv_kw}kW Tier-1 monocrystalline PV array and {battery_kwh}kWh deep-cycle energy storage modules. Transport optimized for local infrastructure constraints with weather-sealed transit routing."
         },
         {
-            "milestone": "Installation & Wiring",
+            "milestone": f"Microgrid Trenching & Power Electronics Commissioning ({households} Nodes)",
             "date": (now + timedelta(days=install_days)).strftime("%Y-%m-%d"),
             "status": "pending",
-            "note": f"{solar_kits} solar kits for {households} households"
+            "note": f"Deploying point-to-point decentralized transmission for {solar_kits} synchronized solar kits. Establishing high-voltage tie-ins across the {density} settlement vector with {battery_dod*100}% DoD configured storage protocols."
         },
         {
-            "milestone": "Commissioning & Community Handover",
+            "milestone": "System Automation, Stress-Testing & Decentralized Handover",
             "date": (now + timedelta(days=handover_days)).strftime("%Y-%m-%d"),
             "status": "pending",
-            "note": "System testing, training, and handover to local operators"
+            "note": f"Validating off-grid autonomy for {battery_autonomy_days} consecutive days under standard local load ({demand_kwh} kWh/day). Calibrating localized smart-meters and conducting maintenance training for village operators."
         },
     ]
 
@@ -332,11 +334,57 @@ def optimize_energy_plan(feature_context: dict) -> dict:
 
     # Generate Actionable Deployment Timeline
     now = datetime.now(timezone.utc)
-    timeline = [
-        {"milestone": "Site Preparation", "date": (now + timedelta(days=14)).strftime("%Y-%m-%d"), "status": "pending"},
-        {"milestone": "Procurement & Transit", "date": (now + timedelta(days=30)).strftime("%Y-%m-%d"), "status": "pending"},
-        {"milestone": "Installation Setup", "date": (now + timedelta(days=45)).strftime("%Y-%m-%d"), "status": "pending"},
-        {"milestone": "Commissioning & Handover", "date": (now + timedelta(days=60)).strftime("%Y-%m-%d"), "status": "pending"},
+    
+    scale = "large" if pv_kw > 50 else ("medium" if pv_kw > 20 else "small")
+    prep_days = 21 if scale == "large" else 14
+    procurement_days = 45 if scale == "large" else 30
+    install_days = 60 if scale == "large" else 45
+    handover_days = 80 if scale == "large" else 60
+    
+    # We still have access to the full spatial payload in this block
+    land_cover_str = '; '.join(land_cover[:2]) if land_cover else 'Mixed terrain'
+
+    timeline = []
+    if flood_risk_factor > 1.1 or water_pct > 10:
+        timeline.append({
+            "milestone": f"Hydro-Spatial Risk Assessment & Base Station Elevation",
+            "date": (now + timedelta(days=7)).strftime("%Y-%m-%d"),
+            "status": "pending",
+            "note": f"Critical NDWI water coverage of {water_pct:.1f}% detected. Proposing minimum rack elevation of 1.5m above ground level."
+        })
+    if veg_loss > 20:
+        timeline.append({
+            "milestone": "Ecological Stress & Substrate Stability Analysis",
+            "date": (now + timedelta(days=7)).strftime("%Y-%m-%d"),
+            "status": "pending",
+            "note": f"Severe vegetation loss ({veg_loss:.0f}%) recorded. Verifying topsoil integrity prior to trenching."
+        })
+        
+    timeline += [
+        {
+            "milestone": f"Spatial Grading & Topographical Leveling for {density.title()} Density Profile",
+            "date": (now + timedelta(days=prep_days)).strftime("%Y-%m-%d"),
+            "status": "pending",
+            "note": f"Executing LiDAR-assisted ground clearing for {pv_kw}kW structural footprint. Mitigating {(shading_penalty * 100):.1f}% vegetative shading risk. Primary land cover interference: {land_cover_str}."
+        },
+        {
+            "milestone": f"Supply Chain Routing & Hardware Transit (Class {'A Heavy-Lift' if scale == 'large' else 'B Logistics'})",
+            "date": (now + timedelta(days=procurement_days)).strftime("%Y-%m-%d"),
+            "status": "pending",
+            "note": f"Procuring {pv_kw}kW Tier-1 monocrystalline PV array and {battery_kwh}kWh deep-cycle energy storage modules. Transport optimized for local infrastructure constraints with weather-sealed transit routing."
+        },
+        {
+            "milestone": f"Microgrid Trenching & Power Electronics Commissioning ({households} Nodes)",
+            "date": (now + timedelta(days=install_days)).strftime("%Y-%m-%d"),
+            "status": "pending",
+            "note": f"Deploying point-to-point decentralized transmission for {solar_kits} synchronized solar kits. Establishing high-voltage tie-ins across the {density} settlement vector with {battery_dod*100}% DoD configured storage protocols."
+        },
+        {
+            "milestone": "System Automation, Stress-Testing & Decentralized Handover",
+            "date": (now + timedelta(days=handover_days)).strftime("%Y-%m-%d"),
+            "status": "pending",
+            "note": f"Validating off-grid autonomy for {battery_autonomy_days} consecutive days under standard local load ({demand_kwh} kWh/day). Calibrating localized smart-meters and conducting maintenance training for village operators."
+        },
     ]
 
     return {
