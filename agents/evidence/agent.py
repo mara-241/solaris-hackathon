@@ -21,19 +21,27 @@ def build_evidence_pack(request: dict, feature_context: dict, optimization: dict
     profile = load_agent_profile("evidence", DEFAULT_PROFILE)
     style = profile.get("style", {})
 
-    demand = optimization["demand_forecast"]["kwh_per_day"]
-    primary = optimization["scenario_set"]["primary"]
+    optimization = optimization or {}
+    demand_forecast = optimization.get("demand_forecast", {})
+    demand = demand_forecast.get("kwh_per_day", 0.0)
+    
+    scenario_set = optimization.get("scenario_set", {})
+    primary = scenario_set.get("primary", {"pv_kw": 0.0})
+    
     confidence = float(optimization.get("confidence", 0.5) or 0.5)
 
     prefix = style.get("normal_prefix", "Summary:")
     if confidence < 0.6:
         prefix = style.get("low_confidence_prefix", "Caution: lower confidence output.")
 
+    opt_result = optimization.get("optimization_result", {})
+    priority_score = opt_result.get("priority_score", 0.0)
+
     summary = (
-        f"{prefix} Site ({request['lat']}, {request['lon']}): "
+        f"{prefix} Site ({request.get('lat', 0)}, {request.get('lon', 0)}): "
         f"{demand} kWh/day forecast, "
-        f"{primary['pv_kw']} kW PV, "
-        f"priority {optimization['optimization_result']['priority_score']}."
+        f"{primary.get('pv_kw', 0.0)} kW PV, "
+        f"priority {priority_score}."
     )
 
     quality_flags = [

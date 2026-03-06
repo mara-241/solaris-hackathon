@@ -23,6 +23,26 @@ class RunStore(ABC):
     def get_run(self, run_id: str) -> dict | None:
         raise NotImplementedError
 
+    @abstractmethod
+    def save_location(self, loc_id: str, name: str, lat: float, lon: float, households: int, latest_run_id: str | None = None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_locations(self) -> list[dict]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def update_location_run(self, loc_id: str, run_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_runs_for_location(self, loc_id: str) -> list[dict]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_dashboard_stats(self) -> dict:
+        raise NotImplementedError
+
 
 class SQLiteRunStore(RunStore):
     def __init__(self, db_path: Path = DB_PATH):
@@ -62,6 +82,18 @@ class SQLiteRunStore(RunStore):
                   summary text,
                   confidence real,
                   payload text not null
+                )
+                """
+            )
+            conn.execute(
+                """
+                create table if not exists locations (
+                  loc_id text primary key,
+                  name text not null,
+                  lat real not null,
+                  lon real not null,
+                  households integer not null,
+                  latest_run_id text
                 )
                 """
             )
@@ -129,6 +161,58 @@ class SQLiteRunStore(RunStore):
             return None
         return json.loads(row[0])
 
+    def save_location(self, loc_id: str, name: str, lat: float, lon: float, households: int, latest_run_id: str | None = None) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                insert into locations(loc_id, name, lat, lon, households, latest_run_id)
+                values(?, ?, ?, ?, ?, ?)
+                on conflict(loc_id) do update set
+                  name=excluded.name,
+                  lat=excluded.lat,
+                  lon=excluded.lon,
+                  households=excluded.households,
+                  latest_run_id=excluded.latest_run_id
+                """,
+                (loc_id, name, lat, lon, households, latest_run_id)
+            )
+
+    def get_locations(self) -> list[dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("select loc_id, name, lat, lon, households, latest_run_id from locations").fetchall()
+            return [dict(r) for r in rows]
+
+    def update_location_run(self, loc_id: str, run_id: str) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("update locations set latest_run_id = ? where loc_id = ?", (run_id, loc_id))
+
+    def get_runs_for_location(self, loc_id: str) -> list[dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "select run_id, status, created_at, confidence from runs where run_id in "
+                "(select latest_run_id from locations where loc_id = ?) "
+                "union select r.run_id, r.status, r.created_at, r.confidence from runs r "
+                "inner join locations l on r.payload like '%' || l.loc_id || '%' where l.loc_id = ? "
+                "order by created_at desc limit 20",
+                (loc_id, loc_id),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_dashboard_stats(self) -> dict:
+        with sqlite3.connect(self.db_path) as conn:
+            loc_count = conn.execute("select count(*) from locations").fetchone()[0]
+            hh_sum = conn.execute("select coalesce(sum(households), 0) from locations").fetchone()[0]
+            run_count = conn.execute("select count(*) from runs").fetchone()[0]
+            avg_conf = conn.execute("select coalesce(avg(confidence), 0) from runs").fetchone()[0]
+            return {
+                "total_locations": loc_count,
+                "total_households": hh_sum,
+                "total_runs": run_count,
+                "avg_confidence": round(avg_conf, 3),
+            }
+
 
 class PostgresRunStore(RunStore):
     def __init__(self, dsn: str):
@@ -181,6 +265,18 @@ class PostgresRunStore(RunStore):
                       confidence double precision,
                       payload jsonb not null,
                       created_at timestamptz not null default now()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    create table if not exists locations (
+                      loc_id text primary key,
+                      name text not null,
+                      lat double precision not null,
+                      lon double precision not null,
+                      households integer not null,
+                      latest_run_id text
                     )
                     """
                 )
@@ -266,6 +362,67 @@ class PostgresRunStore(RunStore):
         if isinstance(payload, str):
             return json.loads(payload)
         return payload
+
+    def save_location(self, loc_id: str, name: str, lat: float, lon: float, households: int, latest_run_id: str | None = None) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    insert into locations(loc_id, name, lat, lon, households, latest_run_id)
+                    values(%s, %s, %s, %s, %s, %s)
+                    on conflict (loc_id) do update set
+                      name=excluded.name,
+                      lat=excluded.lat,
+                      lon=excluded.lon,
+                      households=excluded.households,
+                      latest_run_id=excluded.latest_run_id
+                    """,
+                    (loc_id, name, lat, lon, households, latest_run_id)
+                )
+            conn.commit()
+
+    def get_locations(self) -> list[dict]:
+        from psycopg.rows import dict_row # type: ignore
+        with self._connect() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("select loc_id, name, lat, lon, households, latest_run_id from locations")
+                return cur.fetchall()
+
+    def update_location_run(self, loc_id: str, run_id: str) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("update locations set latest_run_id = %s where loc_id = %s", (run_id, loc_id))
+            conn.commit()
+
+    def get_runs_for_location(self, loc_id: str) -> list[dict]:
+        from psycopg.rows import dict_row  # type: ignore
+        with self._connect() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    "select run_id, status, started_at as created_at, confidence_score as confidence "
+                    "from runs where run_id in (select latest_run_id from locations where loc_id = %s) "
+                    "order by started_at desc limit 20",
+                    (loc_id,),
+                )
+                return cur.fetchall()
+
+    def get_dashboard_stats(self) -> dict:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select count(*) from locations")
+                loc_count = cur.fetchone()[0]
+                cur.execute("select coalesce(sum(households), 0) from locations")
+                hh_sum = cur.fetchone()[0]
+                cur.execute("select count(*) from runs")
+                run_count = cur.fetchone()[0]
+                cur.execute("select coalesce(avg(confidence_score), 0) from runs")
+                avg_conf = cur.fetchone()[0]
+                return {
+                    "total_locations": loc_count,
+                    "total_households": int(hh_sum),
+                    "total_runs": run_count,
+                    "avg_confidence": round(float(avg_conf), 3),
+                }
 
 
 def get_store() -> RunStore:

@@ -5,3 +5,14 @@ psycopg[binary]
 defusedxml
 ruff
 jsonschema
+# LangGraph agent orchestration
+langchain
+langchain-openai
+langchain-core
+langgraph
+# Satellite imagery processing (from getting-started.ipynb)
+pystac-client
+planetary-computer
+rasterio
+rioxarray
+numpy

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -13,6 +14,11 @@ CACHE_DIR = Path(__file__).resolve().parents[1] / ".cache" / "http"
 
 class CacheFetchError(RuntimeError):
     pass
+
+
+def _cache_enabled() -> bool:
+    raw = os.getenv("HTTP_CACHE_ENABLED", "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 def _cache_path(key: str) -> Path:
@@ -29,13 +35,15 @@ def fetch_json_cached(
     method: str = "GET",
     body: dict | list | None = None,
 ) -> tuple[Any, bool, bool]:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_enabled = _cache_enabled()
+    if cache_enabled:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
     body_str = json.dumps(body, sort_keys=True) if body is not None else ""
     key = f"{method.upper()}::{url}::{body_str}"
     p = _cache_path(key)
     now = time.time()
 
-    if p.exists():
+    if cache_enabled and p.exists():
         cached = json.loads(p.read_text())
         age = now - float(cached.get("ts", 0))
         if age <= ttl_seconds:
@@ -50,21 +58,24 @@ def fetch_json_cached(
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
-        p.write_text(json.dumps({"ts": now, "payload": payload}))
+        if cache_enabled:
+            p.write_text(json.dumps({"ts": now, "payload": payload}))
         return payload, False, False
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-        if stale_ok and p.exists():
+        if cache_enabled and stale_ok and p.exists():
             cached = json.loads(p.read_text())
             return cached["payload"], True, True
         raise CacheFetchError(f"fetch_json_cached failed for {url}: {type(exc).__name__}") from exc
 
 
 def fetch_bytes_cached(url: str, *, timeout: int = 10, ttl_seconds: int = 86400, stale_ok: bool = True) -> tuple[bytes, bool, bool]:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_enabled = _cache_enabled()
+    if cache_enabled:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
     p = _cache_path(url)
     now = time.time()
 
-    if p.exists():
+    if cache_enabled and p.exists():
         cached = json.loads(p.read_text())
         age = now - float(cached.get("ts", 0))
         if age <= ttl_seconds:
@@ -74,10 +85,11 @@ def fetch_bytes_cached(url: str, *, timeout: int = 10, ttl_seconds: int = 86400,
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
-        p.write_text(json.dumps({"ts": now, "payload_hex": raw.hex()}))
+        if cache_enabled:
+            p.write_text(json.dumps({"ts": now, "payload_hex": raw.hex()}))
         return raw, False, False
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
-        if stale_ok and p.exists():
+        if cache_enabled and stale_ok and p.exists():
             cached = json.loads(p.read_text())
             return bytes.fromhex(cached["payload_hex"]), True, True
         raise CacheFetchError(f"fetch_bytes_cached failed for {url}: {type(exc).__name__}") from exc
