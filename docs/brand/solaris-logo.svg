@@ -1,0 +1,46 @@
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="180" y1="120" x2="1020" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1020"/>
+      <stop offset="1" stop-color="#131A33"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="350" y1="260" x2="820" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FDBA74"/>
+      <stop offset="1" stop-color="#F97316"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="230" y1="200" x2="980" y2="940" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="490" y1="390" x2="740" y2="860" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#FACC15"/>
+    </linearGradient>
+    <filter id="glow" x="140" y="140" width="920" height="920" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="18" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="80" y="80" width="1040" height="1040" rx="240" fill="url(#bg)"/>
+
+  <g filter="url(#glow)">
+    <circle cx="600" cy="600" r="330" stroke="url(#ring)" stroke-width="36" opacity="0.95"/>
+    <circle cx="600" cy="600" r="240" fill="url(#sun)"/>
+
+    <path d="M640 360L500 620H615L540 840L710 560H595L640 360Z" fill="url(#bolt)"/>
+
+    <path d="M600 210V150" stroke="#7DD3FC" stroke-width="20" stroke-linecap="round"/>
+    <path d="M600 1050V990" stroke="#7DD3FC" stroke-width="20" stroke-linecap="round"/>
+    <path d="M210 600H150" stroke="#7DD3FC" stroke-width="20" stroke-linecap="round"/>
+    <path d="M1050 600H990" stroke="#7DD3FC" stroke-width="20" stroke-linecap="round"/>
+
+    <path d="M875 325L920 280" stroke="#7DD3FC" stroke-width="20" stroke-linecap="round"/>
+    <path d="M280 920L325 875" stroke="#7DD3FC" stroke-width="20" stroke-linecap="round"/>
+    <path d="M875 875L920 920" stroke="#7DD3FC" stroke-width="20" stroke-linecap="round"/>
+    <path d="M280 280L325 325" stroke="#7DD3FC" stroke-width="20" stroke-linecap="round"/>
+  </g>
+</svg>
