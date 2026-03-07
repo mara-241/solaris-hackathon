@@ -217,7 +217,7 @@ def compute_impact_metrics(
     )
     over_waste_reduction = round(min(OVER_WASTE_MAX, OVER_WASTE_BASE + (priority_score * OVER_WASTE_PRIORITY_MULTIPLIER)), 2)
 
-    return {
+    result = {
         "estimated_efficiency_gain_pct": efficiency_gain,
         "under_provisioning_risk_reduction_pct": under_risk_reduction,
         "over_provisioning_waste_reduction_pct": over_waste_reduction,
