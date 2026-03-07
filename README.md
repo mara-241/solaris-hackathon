@@ -17,18 +17,18 @@ GitHub README does not reliably inline PDF slides, so here are direct links:
 - **View deck page:** [Solaris Pitch Deck Viewer](https://mara-241.github.io/solaris-hackathon/pitch/)
 - **Open PDF directly:** [Solaris_Pitch_Deck.pdf](https://mara-241.github.io/solaris-hackathon/pitch/Solaris_Pitch_Deck.pdf)
 
-### Inline Slides (No Click Needed)
+### Slide Navigator (Compact)
+
+Pick a slide:
+1. [Slide 1](docs/pitch/slides/slide-01.png) · 2. [Slide 2](docs/pitch/slides/slide-02.png) · 3. [Slide 3](docs/pitch/slides/slide-03.png) · 4. [Slide 4](docs/pitch/slides/slide-04.png) · 5. [Slide 5](docs/pitch/slides/slide-05.png)
+6. [Slide 6](docs/pitch/slides/slide-06.png) · 7. [Slide 7](docs/pitch/slides/slide-07.png) · 8. [Slide 8](docs/pitch/slides/slide-08.png) · 9. [Slide 9](docs/pitch/slides/slide-09.png) · 10. [Slide 10](docs/pitch/slides/slide-10.png)
+
+<details>
+  <summary>Preview (open/collapse)</summary>
 
 ![Slide 1](docs/pitch/slides/slide-01.png)
-![Slide 2](docs/pitch/slides/slide-02.png)
-![Slide 3](docs/pitch/slides/slide-03.png)
-![Slide 4](docs/pitch/slides/slide-04.png)
-![Slide 5](docs/pitch/slides/slide-05.png)
-![Slide 6](docs/pitch/slides/slide-06.png)
-![Slide 7](docs/pitch/slides/slide-07.png)
-![Slide 8](docs/pitch/slides/slide-08.png)
-![Slide 9](docs/pitch/slides/slide-09.png)
-![Slide 10](docs/pitch/slides/slide-10.png)
+
+</details>
 
 ## Overview
 
