@@ -17,6 +17,19 @@ GitHub README does not reliably inline PDF slides, so here are direct links:
 - **View deck page:** [Solaris Pitch Deck Viewer](https://mara-241.github.io/solaris-hackathon/pitch/)
 - **Open PDF directly:** [Solaris_Pitch_Deck.pdf](https://mara-241.github.io/solaris-hackathon/pitch/Solaris_Pitch_Deck.pdf)
 
+### Inline Slides (No Click Needed)
+
+![Slide 1](docs/pitch/slides/slide-01.png)
+![Slide 2](docs/pitch/slides/slide-02.png)
+![Slide 3](docs/pitch/slides/slide-03.png)
+![Slide 4](docs/pitch/slides/slide-04.png)
+![Slide 5](docs/pitch/slides/slide-05.png)
+![Slide 6](docs/pitch/slides/slide-06.png)
+![Slide 7](docs/pitch/slides/slide-07.png)
+![Slide 8](docs/pitch/slides/slide-08.png)
+![Slide 9](docs/pitch/slides/slide-09.png)
+![Slide 10](docs/pitch/slides/slide-10.png)
+
 ## Overview
 
 ```mermaid
