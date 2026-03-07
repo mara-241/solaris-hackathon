@@ -1,0 +1,13 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <rect width="1024" height="1024" rx="180" fill="#FFFFFF"/>
+  <rect x="22" y="22" width="980" height="980" rx="158" stroke="#E5E7EB" stroke-width="8"/>
+
+  <g transform="translate(272,190)">
+    <circle cx="240" cy="240" r="180" stroke="#0EA5E9" stroke-width="20"/>
+    <path d="M105 267C143 224 188 202 240 202C292 202 337 224 375 267" stroke="#0F172A" stroke-width="16" stroke-linecap="round"/>
+    <circle cx="240" cy="168" r="42" fill="#F59E0B"/>
+    <path d="M240 20V0M73 73L58 58M407 73L422 58M20 240H0M480 240H460" stroke="#38BDF8" stroke-width="11" stroke-linecap="round"/>
+  </g>
+
+  <text x="512" y="815" text-anchor="middle" fill="#0F172A" font-size="108" font-family="Inter, Arial, sans-serif" font-weight="600" letter-spacing="0.5">Solaris</text>
+</svg>
