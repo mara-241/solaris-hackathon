@@ -14,7 +14,7 @@ Given a village (`lat/lon`, households, usage profile), produce:
 ## Repository Structure
 - `agents/` — orchestrator + perception + spatial_vlm + energy_optimization + evidence
 - `shared/schemas/` — pipeline contracts (source of truth)
-- `apps/api/` — API backend (`/run`, `/run/{id}`, `/run/{id}/quality`, `/health`)
+- `apps/api/` — API backend (core run endpoints + chat/location/satellite dashboard APIs)
 - `db/` — SQL schema scaffold for Postgres
 - `tests/` — unit + smoke tests
 - `docs/` — architecture, operations, implementation plan
@@ -33,8 +33,6 @@ Define and freeze `shared/schemas/pipeline.v1.json` before implementation starts
 - `scripts/authorize_push.py` — record explicit human push authorization
 - `scripts/review_ready_ping.py` — Telegram ping when task is fully review-ready
 - `scripts/update_task_checks.py` — auto-update checks from validation runs (+ codex/gemini status)
-- `scripts/set_review_checks.py` — set Codex/Gemini reviewer outcomes explicitly
-- `scripts/collect_review_evidence.py` — ingest reviewer evidence JSON into task checks
 - `scripts/validate_vlm_contract.py` — validate required VLM output contract keys/confidence
 - `scripts/demo_scenarios.py` — run rainy-season + high-growth demo scenarios
 - `scripts/generate_demo_report.py` — generate markdown scenario/impact report for judges
@@ -116,6 +114,32 @@ If auth is enabled, add:
 - `python3` not found on Windows -> use `python` or `py`
 - `uvicorn` not found -> re-run dependency install
 - 401 unauthorized on `/run` -> missing/wrong `x-api-key` when `SOLARIS_API_TOKEN` is set
+
+## API Surface (Current)
+
+### Core
+- `GET /health`
+- `POST /run`
+- `GET /run/{run_id}`
+- `GET /run/{run_id}/quality`
+- `POST /forecast` (backward-compatible alias for `/run`)
+
+### OpenClaw / Chat
+- `POST /openclaw/execute`
+- `POST /api/chat`
+
+### Dashboard + Locations
+- `POST /api/locations`
+- `GET /api/locations`
+- `GET /api/locations/{loc_id}`
+- `POST /api/locations/{loc_id}/reanalyze`
+- `GET /api/locations/{loc_id}/satellite`
+- `GET /api/locations/{loc_id}/runs`
+- `GET /api/dashboard/stats`
+
+### Utility
+- `POST /api/satellite/search`
+- `GET /api/geocode`
 
 ## Operating Docs
 - `docs/OPERATIONS.md`
