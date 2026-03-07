@@ -1,0 +1,22 @@
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <defs>
+    <linearGradient id="g1" x1="120" y1="120" x2="1080" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1B34"/>
+      <stop offset="1" stop-color="#10284D"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="350" y1="300" x2="850" y2="900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#0EA5E9"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="470" y1="410" x2="730" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+  <rect x="80" y="80" width="1040" height="1040" rx="210" fill="url(#g1)"/>
+  <circle cx="600" cy="600" r="320" stroke="url(#g2)" stroke-width="28"/>
+  <circle cx="600" cy="600" r="250" stroke="#7DD3FC" stroke-opacity="0.35" stroke-width="10"/>
+  <circle cx="600" cy="600" r="150" fill="url(#sun)"/>
+  <path d="M620 430L530 610H615L560 760L675 575H595L620 430Z" fill="#F8FAFC"/>
+  <path d="M305 785C365 705 468 655 600 655C732 655 835 705 895 785" stroke="#E2E8F0" stroke-opacity="0.85" stroke-width="22" stroke-linecap="round"/>
+</svg>
