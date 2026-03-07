@@ -26,6 +26,8 @@ from langchain_openai import ChatOpenAI
 # Existing Solaris agents -------------------------------------------------
 from agents.perception.agent import read_and_analyze_data
 from agents.spatial_vlm.agent import analyze_spatial_context
+from agents.energy_optimization.agent import optimize_energy_plan
+from agents.evidence.agent import build_evidence_pack
 
 logger = logging.getLogger(__name__)
 MAX_AGENT_LLM_INPUT_CHARS = 40000
@@ -183,45 +185,61 @@ def _normalize_energy_output(raw: dict, request: dict, spatial: dict, perception
     perception = perception if isinstance(perception, dict) else {}
     demographics = perception.get("demographics", {}) if isinstance(perception.get("demographics"), dict) else {}
     weather = perception.get("weather", {}) if isinstance(perception.get("weather"), dict) else {}
-    baselines = perception.get("baselines", {}) if isinstance(perception.get("baselines"), dict) else {}
+    _ = weather  # retained for context parity, but no synthetic calculations.
 
     households = max(1, _as_int(request.get("households") or demographics.get("households"), 100))
     confidence = max(0.0, min(1.0, _as_float(raw.get("confidence"), 0.65)))
-
-    sun_hours = _as_float(weather.get("sun_hours"), 4.5)
-    rain_risk = max(0.0, min(1.0, _as_float(weather.get("rain_risk"), 0.3)))
-    density = (
-        spatial.get("feature_summaries", {}).get("settlement_density")
-        if isinstance(spatial.get("feature_summaries"), dict)
-        else None
-    )
-    density_factor = {"high": 1.15, "medium": 1.0, "low": 0.9}.get(str(density).lower(), 1.0)
-    baseline_daily = _as_float(baselines.get("daily_baseline_kwh"), households * 1.4)
-    demand_from_apis = round(
-        baseline_daily * (1.0 + max(0.0, (4.5 - sun_hours) * 0.06) + (rain_risk * 0.03)) * density_factor,
-        2,
-    )
+    quality_flags = raw.get("quality_flags") if isinstance(raw.get("quality_flags"), list) else []
+    quality_flags = [str(x) for x in quality_flags]
 
     demand = raw.get("demand_forecast") if isinstance(raw.get("demand_forecast"), dict) else {}
-    kwh_per_day = max(0.0, round(_as_float(demand.get("kwh_per_day"), 0.0), 2))
-    if kwh_per_day <= 0:
-        kwh_per_day = max(0.1, demand_from_apis)
-    lower_ci = round(_as_float(demand.get("lower_ci"), kwh_per_day * 0.85), 2)
-    upper_ci = round(_as_float(demand.get("upper_ci"), max(kwh_per_day, lower_ci) * 1.15), 2)
-    if lower_ci > upper_ci:
+    kwh_per_day_raw = demand.get("kwh_per_day")
+    lower_ci_raw = demand.get("lower_ci")
+    upper_ci_raw = demand.get("upper_ci")
+    try:
+        kwh_per_day = round(float(kwh_per_day_raw), 2) if kwh_per_day_raw is not None else None
+    except (TypeError, ValueError):
+        kwh_per_day = None
+    try:
+        lower_ci = round(float(lower_ci_raw), 2) if lower_ci_raw is not None else None
+    except (TypeError, ValueError):
+        lower_ci = None
+    try:
+        upper_ci = round(float(upper_ci_raw), 2) if upper_ci_raw is not None else None
+    except (TypeError, ValueError):
+        upper_ci = None
+    if lower_ci is not None and upper_ci is not None and lower_ci > upper_ci:
         lower_ci, upper_ci = upper_ci, lower_ci
+    if kwh_per_day is not None and kwh_per_day <= 0:
+        kwh_per_day = None
+    if lower_ci is not None and lower_ci <= 0:
+        lower_ci = None
+    if upper_ci is not None and upper_ci <= 0:
+        upper_ci = None
 
     scenario_set = raw.get("scenario_set") if isinstance(raw.get("scenario_set"), dict) else {}
     primary = scenario_set.get("primary") if isinstance(scenario_set.get("primary"), dict) else {}
-    pv_kw = max(0.0, round(_as_float(primary.get("pv_kw"), 0.0), 2))
-    battery_kwh = max(0.0, round(_as_float(primary.get("battery_kwh"), 0.0), 2))
-    solar_kits = max(0, _as_int(primary.get("solar_kits"), 0))
-    if pv_kw <= 0:
-        pv_kw = round(kwh_per_day / max(0.5, sun_hours * 0.8), 2)
-    if battery_kwh <= 0:
-        battery_kwh = round((kwh_per_day * 0.8) / max(0.1, 0.85 * 0.9), 2)
-    if solar_kits <= 0:
-        solar_kits = max(1, _as_int(kwh_per_day / 1.2, 1))
+    pv_raw = primary.get("pv_kw")
+    battery_raw = primary.get("battery_kwh")
+    kits_raw = primary.get("solar_kits")
+    try:
+        pv_kw = round(float(pv_raw), 2) if pv_raw is not None else None
+    except (TypeError, ValueError):
+        pv_kw = None
+    try:
+        battery_kwh = round(float(battery_raw), 2) if battery_raw is not None else None
+    except (TypeError, ValueError):
+        battery_kwh = None
+    try:
+        solar_kits = int(kits_raw) if kits_raw is not None else None
+    except (TypeError, ValueError):
+        solar_kits = None
+    if pv_kw is not None and pv_kw <= 0:
+        pv_kw = None
+    if battery_kwh is not None and battery_kwh <= 0:
+        battery_kwh = None
+    if solar_kits is not None and solar_kits <= 0:
+        solar_kits = None
 
     optimization_result = raw.get("optimization_result") if isinstance(raw.get("optimization_result"), dict) else {}
     priority_score = max(0.0, min(1.0, _as_float(optimization_result.get("priority_score"), 0.5)))
@@ -253,13 +271,21 @@ def _normalize_energy_output(raw: dict, request: dict, spatial: dict, perception
             )
 
     impact = raw.get("impact_metrics") if isinstance(raw.get("impact_metrics"), dict) else {}
-    co2 = round(_as_float(impact.get("co2_avoided_tons_estimate"), 0.0), 2)
-    savings = round(_as_float(impact.get("annual_cost_savings_usd_estimate"), 0.0), 2)
+    co2_raw = impact.get("co2_avoided_tons_estimate")
+    savings_raw = impact.get("annual_cost_savings_usd_estimate")
+    try:
+        co2 = round(float(co2_raw), 2) if co2_raw is not None else None
+    except (TypeError, ValueError):
+        co2 = None
+    try:
+        savings = round(float(savings_raw), 2) if savings_raw is not None else None
+    except (TypeError, ValueError):
+        savings = None
+    if co2 is not None and co2 <= 0:
+        co2 = None
+    if savings is not None and savings <= 0:
+        savings = None
     households_served = max(1, _as_int(impact.get("households_served_estimate"), households))
-    if co2 <= 0:
-        co2 = round((kwh_per_day * 365.0 * 0.0007), 2)
-    if savings <= 0:
-        savings = round((kwh_per_day * 365.0 * 0.18), 2)
 
     model_metadata = raw.get("model_metadata") if isinstance(raw.get("model_metadata"), dict) else {}
     if "strategy" not in model_metadata:
@@ -269,10 +295,43 @@ def _normalize_energy_output(raw: dict, request: dict, spatial: dict, perception
         model_metadata["sizing_parameters"] = {}
 
     assumptions = raw.get("assumptions") if isinstance(raw.get("assumptions"), list) else []
-    quality_flags = raw.get("quality_flags") if isinstance(raw.get("quality_flags"), list) else []
+    if kwh_per_day is None:
+        quality_flags.append("missing_demand_forecast")
+    if pv_kw is None or battery_kwh is None or solar_kits is None:
+        quality_flags.append("missing_scenario_values")
+    if co2 is None or savings is None:
+        quality_flags.append("missing_impact_metrics")
+
     spatial_insights = raw.get("spatial_insights") if isinstance(raw.get("spatial_insights"), dict) else {}
     if not spatial_insights and isinstance(spatial, dict):
         spatial_insights = spatial.get("feature_summaries", {}) if isinstance(spatial.get("feature_summaries"), dict) else {}
+
+    demand_forecast_out = {}
+    if kwh_per_day is not None and lower_ci is not None and upper_ci is not None:
+        demand_forecast_out = {
+            "kwh_per_day": kwh_per_day,
+            "lower_ci": lower_ci,
+            "upper_ci": upper_ci,
+        }
+
+    primary_out = {}
+    if pv_kw is not None:
+        primary_out["pv_kw"] = pv_kw
+    if battery_kwh is not None:
+        primary_out["battery_kwh"] = battery_kwh
+    if solar_kits is not None:
+        primary_out["solar_kits"] = solar_kits
+
+    impact_out = {
+        "households_served_estimate": households_served,
+        "estimated_efficiency_gain_pct": efficiency_gain,
+        "priority_score": priority_score,
+        "confidence_band": str(impact.get("confidence_band", "medium")),
+    }
+    if co2 is not None:
+        impact_out["co2_avoided_tons_estimate"] = co2
+    if savings is not None:
+        impact_out["annual_cost_savings_usd_estimate"] = savings
 
     return {
         "status": "ok",
@@ -280,17 +339,9 @@ def _normalize_energy_output(raw: dict, request: dict, spatial: dict, perception
         "assumptions": [str(x) for x in assumptions],
         "quality_flags": [str(x) for x in quality_flags],
         "model_metadata": model_metadata,
-        "demand_forecast": {
-            "kwh_per_day": kwh_per_day,
-            "lower_ci": lower_ci,
-            "upper_ci": upper_ci,
-        },
+        "demand_forecast": demand_forecast_out,
         "scenario_set": {
-            "primary": {
-                "pv_kw": pv_kw,
-                "battery_kwh": battery_kwh,
-                "solar_kits": solar_kits,
-            }
+            "primary": primary_out
         },
         "optimization_result": {
             "priority_score": priority_score,
@@ -298,16 +349,53 @@ def _normalize_energy_output(raw: dict, request: dict, spatial: dict, perception
             "top_plan_id": str(optimization_result.get("top_plan_id", "primary")),
             "actionable_timeline": normalized_timeline,
         },
-        "impact_metrics": {
-            "co2_avoided_tons_estimate": co2,
-            "annual_cost_savings_usd_estimate": savings,
-            "households_served_estimate": households_served,
-            "estimated_efficiency_gain_pct": efficiency_gain,
-            "priority_score": priority_score,
-            "confidence_band": str(impact.get("confidence_band", "medium")),
-        },
+        "impact_metrics": impact_out,
         "spatial_insights": spatial_insights,
     }
+
+
+def _has_complete_energy_metrics(payload: dict) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    demand = payload.get("demand_forecast") if isinstance(payload.get("demand_forecast"), dict) else {}
+    scenario = payload.get("scenario_set") if isinstance(payload.get("scenario_set"), dict) else {}
+    primary = scenario.get("primary") if isinstance(scenario.get("primary"), dict) else {}
+    if demand.get("kwh_per_day") is None:
+        return False
+    if primary.get("pv_kw") is None or primary.get("battery_kwh") is None or primary.get("solar_kits") is None:
+        return False
+    return True
+
+
+def _merge_energy_outputs(preferred: dict, fallback: dict) -> dict:
+    out = dict(preferred or {})
+    fb = fallback or {}
+
+    for key in ["demand_forecast", "scenario_set", "optimization_result", "impact_metrics", "model_metadata", "spatial_insights"]:
+        lhs = out.get(key)
+        rhs = fb.get(key)
+        if isinstance(lhs, dict) and isinstance(rhs, dict):
+            if key == "impact_metrics":
+                # Always trust API-derived deterministic impact metrics over LLM-suggested values.
+                out[key] = dict(rhs)
+                continue
+            if key == "scenario_set":
+                lhs_primary = lhs.get("primary") if isinstance(lhs.get("primary"), dict) else {}
+                rhs_primary = rhs.get("primary") if isinstance(rhs.get("primary"), dict) else {}
+                merged_primary = dict(rhs_primary)
+                merged_primary.update({k: v for k, v in lhs_primary.items() if v is not None})
+                out[key] = {"primary": merged_primary}
+            else:
+                merged = dict(rhs)
+                merged.update({k: v for k, v in lhs.items() if v is not None})
+                out[key] = merged
+        elif lhs in (None, {}, []):
+            out[key] = rhs
+
+    pref_flags = out.get("quality_flags") if isinstance(out.get("quality_flags"), list) else []
+    fb_flags = fb.get("quality_flags") if isinstance(fb.get("quality_flags"), list) else []
+    out["quality_flags"] = [str(x) for x in [*pref_flags, *fb_flags] if x]
+    return out
 
 
 def _normalize_evidence_output(raw: dict, request: dict, optimization: dict, feature_context: dict) -> dict:
@@ -318,12 +406,7 @@ def _normalize_evidence_output(raw: dict, request: dict, optimization: dict, fea
 
     summary = str(raw.get("summary", "")).strip()
     if not summary:
-        demand = optimization.get("demand_forecast", {}).get("kwh_per_day", 0)
-        pv = optimization.get("scenario_set", {}).get("primary", {}).get("pv_kw", 0)
-        summary = (
-            f"Summary: Site ({request.get('lat', 0)}, {request.get('lon', 0)}) "
-            f"forecast {demand} kWh/day with {pv} kW PV."
-        )
+        quality_flags = [*quality_flags, "missing_evidence_summary"]
 
     return {
         "status": "ok",
@@ -742,7 +825,26 @@ def llm_energy_optimization_from_state(
         )
     if not parsed:
         raise ValueError("LLM returned non-JSON output for energy_optimization")
-    return _normalize_energy_output(parsed, request, spatial, perception)
+
+    normalized = _normalize_energy_output(parsed, request, spatial, perception)
+    if _has_complete_energy_metrics(normalized):
+        return normalized
+
+    feature_context = {
+        "perception": perception if isinstance(perception, dict) else {},
+        "spatial": spatial if isinstance(spatial, dict) else {},
+        "location": {
+            "lat": request.get("lat"),
+            "lon": request.get("lon"),
+        },
+    }
+    deterministic = optimize_energy_plan(feature_context)
+    merged = _merge_energy_outputs(normalized, deterministic)
+    flags = merged.get("quality_flags") if isinstance(merged.get("quality_flags"), list) else []
+    if "llm_missing_fields_backfilled_from_api_data" not in flags:
+        flags.append("llm_missing_fields_backfilled_from_api_data")
+    merged["quality_flags"] = flags
+    return merged
 
 
 def llm_evidence_pack_from_state(
@@ -780,7 +882,18 @@ def llm_evidence_pack_from_state(
         )
     if not parsed:
         raise ValueError("LLM returned non-JSON output for evidence_pack")
-    return _normalize_evidence_output(parsed, request, optimization, feature_context)
+    normalized = _normalize_evidence_output(parsed, request, optimization, feature_context)
+    if normalized.get("summary"):
+        return normalized
+
+    fallback = build_evidence_pack(request, feature_context, optimization if isinstance(optimization, dict) else {})
+    if isinstance(fallback, dict) and fallback.get("summary"):
+        normalized["summary"] = str(fallback.get("summary", "")).strip()
+        qf = normalized.get("quality_flags") if isinstance(normalized.get("quality_flags"), list) else []
+        if "evidence_summary_backfilled" not in qf:
+            qf.append("evidence_summary_backfilled")
+        normalized["quality_flags"] = qf
+    return normalized
 
 
 # ── Tool: geocode_location ──────────────────────────────────────────────────

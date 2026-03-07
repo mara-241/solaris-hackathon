@@ -63,6 +63,15 @@ curl -X POST http://localhost:8000/openclaw/execute \
   -d '{"message": "Analyze energy needs", "lat": -1.286, "lon": 36.817, "households": 120}'
 ```
 
+Returns full run payload plus `loc_id` and `satellite`, so frontend dashboards can open the stored result.
+
+### List OpenClaw execution history
+```bash
+curl "http://localhost:8000/api/openclaw/executions?limit=20"
+```
+
+Returns recent OpenClaw chat/execute logs with `run_id`, `loc_id`, `status`, and `response_text`.
+
 ## Dashboard
 The web dashboard is at `http://localhost:5173` showing:
 - Interactive map with all monitored locations

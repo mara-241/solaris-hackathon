@@ -214,6 +214,7 @@ class SQLiteRunStore(RunStore):
             }
 
 
+
 class PostgresRunStore(RunStore):
     def __init__(self, dsn: str):
         self.dsn = dsn
@@ -423,7 +424,6 @@ class PostgresRunStore(RunStore):
                     "total_runs": run_count,
                     "avg_confidence": round(float(avg_conf), 3),
                 }
-
 
 def get_store() -> RunStore:
     backend = os.getenv("SOLARIS_STORE", "sqlite").lower().strip()

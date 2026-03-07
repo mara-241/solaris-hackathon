@@ -293,10 +293,21 @@ export default function Dashboard() {
     const qualityFlags = Array.isArray(featureContext.quality_flags) ? featureContext.quality_flags : []
     const outputQualityFlags = Array.isArray(outputs?.quality_flags) ? outputs.quality_flags : []
     const guardrailFlags = Array.isArray(guardrail?.guardrail_flags) ? guardrail.guardrail_flags : []
-    const combinedQualityFlags = Array.from(new Set([...qualityFlags, ...outputQualityFlags, ...guardrailFlags].filter(Boolean)))
+    const combinedQualityFlags = Array.from(
+        new Set(
+            [...qualityFlags, ...outputQualityFlags, ...guardrailFlags]
+                .filter(Boolean)
+                .map((flag: any) => String(flag))
+                .filter((flag: string) => !/cache_hit|stale_cache/i.test(flag))
+        )
+    )
     const timeline = Array.isArray(optimization.actionable_timeline) ? optimization.actionable_timeline : []
     const quality = locDetails?.latest_run?.outputs?.quality || {}
     const impact = locDetails?.latest_run?.outputs?.impact_metrics || {}
+    const impactCo2 = toNum(impact?.co2_avoided_tons_estimate)
+    const impactSavings = toNum(impact?.annual_cost_savings_usd_estimate)
+    const hasImpactCo2 = impactCo2 != null && impactCo2 > 0
+    const hasImpactSavings = impactSavings != null && impactSavings > 0
     const runRuntime = locDetails?.latest_run?.runtime || {}
     const satImg = satView === "ndvi" ? satData?.ndvi_image : satView === "ndwi" ? satData?.ndwi_image : satData?.preview_url
     const showSummaryOverlay = Boolean(showSummary && selectedLocId && locDetails)
@@ -488,12 +499,12 @@ export default function Dashboard() {
                                         <div className="text-lg font-semibold text-emerald-300">{formatNumberOrNA(plan?.pv_kw, " kW", 1)} + {formatNumberOrNA(plan?.battery_kwh, " kWh", 1)}</div>
                                         <div className="text-[11px] text-muted-foreground">{formatNumberOrNA(plan?.solar_kits, " kits", 0)}</div>
                                     </div>
-                                    <div className="rounded-lg border border-green-400/25 bg-green-500/10 p-3">
+                                    <div className={`rounded-lg border border-green-400/25 bg-green-500/10 p-3 ${hasImpactCo2 ? "" : "hidden"}`}>
                                         <div className="text-[10px] uppercase text-muted-foreground">CO2 Avoided</div>
                                         <div className="text-lg font-semibold text-green-300">{formatNumberOrNA(impact?.co2_avoided_tons_estimate, " t/yr", 1)}</div>
                                         <div className="text-[11px] text-muted-foreground">Efficiency {formatPercentOrNA(impact?.estimated_efficiency_gain_pct, 1)}</div>
                                     </div>
-                                    <div className="rounded-lg border border-teal-400/25 bg-teal-500/10 p-3">
+                                    <div className={`rounded-lg border border-teal-400/25 bg-teal-500/10 p-3 ${hasImpactSavings ? "" : "hidden"}`}>
                                         <div className="text-[10px] uppercase text-muted-foreground">Annual Savings</div>
                                         <div className="text-lg font-semibold text-teal-300">{formatMoneyOrNA(impact?.annual_cost_savings_usd_estimate)}</div>
                                         <div className="text-[11px] text-muted-foreground">Priority {toNum(optimization?.priority_score) != null ? `${Math.round(Number(optimization.priority_score) * 100)}%` : "N/A"}</div>
@@ -569,7 +580,7 @@ export default function Dashboard() {
                                     <div className="rounded-lg border border-white/10 bg-white/5 p-3">
                                         <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Data Quality</div>
                                         <div className="text-sm text-foreground/90">
-                                            Runtime: {toNum(runRuntime?.total_duration_ms) != null ? `${Math.round(Number(runRuntime.total_duration_ms))} ms` : "N/A"}
+                                            Runtime: {(toNum(runRuntime?.total_duration_ms) ?? 0) > 0 ? `${Math.round(Number(runRuntime.total_duration_ms))} ms` : "N/A"}
                                             {quality?.fallback_used ? " | Fallback mode used" : ""}
                                         </div>
                                         {combinedQualityFlags.length > 0 ? (
@@ -661,13 +672,13 @@ export default function Dashboard() {
                                 </div>
 
                                 {/* Impact Quick Cards */}
-                                {Object.keys(impact).length > 0 && (
+                                {(hasImpactCo2 || hasImpactSavings) && (
                                     <div className="grid grid-cols-2 gap-2">
-                                        <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-center">
+                                        <div className={`bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-center ${hasImpactCo2 ? "" : "hidden"}`}>
                                             <div className="text-lg font-bold text-green-400">{formatNumberOrNA(impact.co2_avoided_tons_estimate, "t", 1)}</div>
                                             <div className="text-[10px] text-muted-foreground uppercase">CO₂ Avoided/yr</div>
                                         </div>
-                                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 text-center">
+                                        <div className={`bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 text-center ${hasImpactSavings ? "" : "hidden"}`}>
                                             <div className="text-lg font-bold text-emerald-400">{formatMoneyOrNA(impact.annual_cost_savings_usd_estimate)}</div>
                                             <div className="text-[10px] text-muted-foreground uppercase">Savings/yr</div>
                                         </div>

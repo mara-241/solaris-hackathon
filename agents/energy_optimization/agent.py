@@ -149,6 +149,8 @@ def optimize_energy_plan(feature_context: dict) -> dict:
         households=households,
         priority_score=portfolio_priority,
         confidence_score=confidence,
+        lat=feature_context.get("location", {}).get("lat"),
+        lon=feature_context.get("location", {}).get("lon"),
     )
 
     # Build a scale-aware project delivery plan.

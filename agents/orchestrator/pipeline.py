@@ -217,6 +217,10 @@ def run_pipeline(request: dict) -> dict:
         ],
         "quality_flags": quality_flags,
         "run_id": run_id,
+        "location": {
+            "lat": request.get("lat"),
+            "lon": request.get("lon"),
+        },
         "perception": perception,
         "spatial": spatial,
     }

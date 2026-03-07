@@ -9,10 +9,6 @@ from datetime import datetime, timedelta, timezone
 from shared.http_cache import CacheFetchError, fetch_bytes_cached, fetch_json_cached
 
 GEORSS_POINT_TAG = "{http://www.georss.org/georss}point"
-WEATHER_DEFAULT_RAIN = 30
-WEATHER_DEFAULT_SUN_SECONDS = 18000
-
-
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     r = 6371.0
     p1, p2 = math.radians(lat1), math.radians(lat2)
@@ -37,8 +33,24 @@ def _fetch_weather(lat: float, lon: float) -> tuple[dict, list[str]]:
         )
         payload, from_cache, stale_used = _get_json(url, ttl_seconds=1800)
         daily = payload.get("daily", {})
-        rain_vals = daily.get("precipitation_probability_max") or [WEATHER_DEFAULT_RAIN]
-        sunshine_vals = daily.get("sunshine_duration") or [WEATHER_DEFAULT_SUN_SECONDS]
+        rain_vals = daily.get("precipitation_probability_max")
+        sunshine_vals = daily.get("sunshine_duration")
+        if not isinstance(rain_vals, list) or not rain_vals:
+            flags.append("weather_fields_missing")
+            return {
+                "source": "open-meteo",
+                "rain_risk": None,
+                "sun_hours": None,
+                "error": "Open-Meteo response missing precipitation_probability_max.",
+            }, flags
+        if not isinstance(sunshine_vals, list) or not sunshine_vals:
+            flags.append("weather_fields_missing")
+            return {
+                "source": "open-meteo",
+                "rain_risk": None,
+                "sun_hours": None,
+                "error": "Open-Meteo response missing sunshine_duration.",
+            }, flags
         rain_risk = round((sum(rain_vals) / max(len(rain_vals), 1)) / 100.0, 2)
         sun_hours = round((sum(sunshine_vals) / max(len(sunshine_vals), 1)) / 3600.0, 2)
         if from_cache:

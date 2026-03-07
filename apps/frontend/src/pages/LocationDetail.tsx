@@ -205,6 +205,10 @@ export default function LocationDetail() {
     const plan = outputs.scenario_set?.primary
     const demand = outputs.demand_forecast
     const impact = outputs.impact_metrics || {}
+    const impactCo2 = toNum(impact.co2_avoided_tons_estimate)
+    const impactSavings = toNum(impact.annual_cost_savings_usd_estimate)
+    const hasImpactCo2 = impactCo2 != null && impactCo2 > 0
+    const hasImpactSavings = impactSavings != null && impactSavings > 0
     const quality = outputs.quality || {}
     const modelMeta = outputs.model_metadata || {}
     const sizing = modelMeta.sizing_parameters || {}
@@ -325,12 +329,16 @@ export default function LocationDetail() {
                             <Shield className="h-4 w-4 text-primary" /> Impact Assessment
                         </h2>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <MetricCard icon={Wind} label="CO₂ Avoided" color="text-green-400"
-                                value={formatNumberOrNA(impact.co2_avoided_tons_estimate, "t", 1)}
-                                sub="Tons/year estimate" />
-                            <MetricCard icon={DollarSign} label="Cost Savings" color="text-emerald-400"
-                                value={formatMoneyOrNA(impact.annual_cost_savings_usd_estimate)}
-                                sub="Annual estimate" />
+                            <div className={hasImpactCo2 ? "" : "hidden"}>
+                                <MetricCard icon={Wind} label="CO₂ Avoided" color="text-green-400"
+                                    value={formatNumberOrNA(impact.co2_avoided_tons_estimate, "t", 1)}
+                                    sub="Tons/year estimate" />
+                            </div>
+                            <div className={hasImpactSavings ? "" : "hidden"}>
+                                <MetricCard icon={DollarSign} label="Cost Savings" color="text-emerald-400"
+                                    value={formatMoneyOrNA(impact.annual_cost_savings_usd_estimate)}
+                                    sub="Annual estimate" />
+                            </div>
                             <MetricCard icon={Users} label="Households Served" color="text-blue-400"
                                 value={`${impact.households_served_estimate || loc.households}`}
                                 sub={`Confidence: ${impact.confidence_band || "—"}`} />
@@ -622,7 +630,7 @@ export default function LocationDetail() {
                             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
                                 <Activity className="h-4 w-4 text-primary" /> Agent Pipeline Trace
                                 <span className="ml-auto text-xs font-mono text-muted-foreground">
-                                    Total: {run?.runtime?.total_duration_ms?.toFixed(0)}ms
+                                    Total: {(toNum(run?.runtime?.total_duration_ms) ?? 0) > 0 ? `${Number(run.runtime.total_duration_ms).toFixed(0)}ms` : "N/A"}
                                 </span>
                             </h2>
                             <Card className="bg-white/5 border-white/10">

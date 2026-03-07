@@ -318,6 +318,7 @@ def _build_pipeline_result_from_graph(req: "ChatRequest", final_state: dict) -> 
     optimization_result = energy.get("optimization_result") if isinstance(energy.get("optimization_result"), dict) else {}
     model_metadata = energy.get("model_metadata") if isinstance(energy.get("model_metadata"), dict) else {}
     impact_metrics = energy.get("impact_metrics") if isinstance(energy.get("impact_metrics"), dict) else {}
+    spatial_insights = energy.get("spatial_insights") if isinstance(energy.get("spatial_insights"), dict) else {}
 
     graph_req = final_state.get("request", {}) if isinstance(final_state.get("request"), dict) else {}
     lat = graph_req.get("lat", req.lat if req.lat is not None else 0.0)
@@ -396,6 +397,8 @@ def _build_pipeline_result_from_graph(req: "ChatRequest", final_state: dict) -> 
             "optimization_result": optimization_result if optimization_result else {},
             "model_metadata": model_metadata,
             "impact_metrics": impact_metrics,
+            "spatial_insights": spatial_insights,
+            "quality_flags": energy.get("quality_flags", []) if isinstance(energy.get("quality_flags"), list) else [],
             "provenance": evidence.get("provenance", {}) if isinstance(evidence, dict) else {},
             "quality": {
                 "status": energy_status,
@@ -495,7 +498,7 @@ def openclaw_execute(
     original pipeline, now enhanced with real Satellite VLM capabilities.
     """
     _require_auth(x_api_key)
-    
+
     internal_req = RunRequest(
         request_id=req.thread_id or str(uuid.uuid4()),
         lat=req.lat,
@@ -504,7 +507,7 @@ def openclaw_execute(
         horizon_days=req.horizon_days,
         usage_profile=req.usage_profile
     )
-    
+
     try:
         # Re-use the fast deterministic pipeline run function
         # This will use the newly enhanced spatial agent with real Sentinel-2 data
@@ -815,6 +818,7 @@ def dashboard_stats(x_api_key: str | None = Header(default=None)):
     return store.get_dashboard_stats()
 
 
+
 # ── Direct Satellite Search (no pipeline, notebook-style analysis) ────────
 
 class SatelliteSearchRequest(BaseModel):
@@ -912,3 +916,4 @@ def location_runs(loc_id: str, x_api_key: str | None = Header(default=None)):
     """Fetch run history for a location."""
     _require_auth(x_api_key)
     return {"runs": store.get_runs_for_location(loc_id)}
+
