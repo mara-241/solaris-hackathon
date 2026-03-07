@@ -1,0 +1,11 @@
+<svg width="1600" height="500" viewBox="0 0 1600 500" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <rect width="1600" height="500" fill="#FFFFFF"/>
+  <g transform="translate(120,90)">
+    <circle cx="160" cy="160" r="120" stroke="#111827" stroke-width="16"/>
+    <path d="M70 178C95 150 125 136 160 136C195 136 225 150 250 178" stroke="#111827" stroke-width="12" stroke-linecap="round"/>
+    <circle cx="160" cy="114" r="28" fill="#111827"/>
+    <path d="M160 15V0M48 48L36 36M272 48L284 36M15 160H0M320 160H305" stroke="#111827" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <text x="470" y="220" fill="#111827" font-size="102" font-family="Inter, Arial, sans-serif" font-weight="700" letter-spacing="2">SOLARIS</text>
+  <text x="472" y="290" fill="#374151" font-size="33" font-family="Inter, Arial, sans-serif" font-weight="500" letter-spacing="1.2">Climate Intelligence for Energy Access</text>
+</svg>

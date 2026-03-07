@@ -1,0 +1,16 @@
+<svg width="1600" height="500" viewBox="0 0 1600 500" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <defs>
+    <linearGradient id="sealBg" x1="50" y1="50" x2="450" y2="450" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F2A4D"/>
+      <stop offset="1" stop-color="#1E3A5F"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="500" fill="#F8FAFC"/>
+  <circle cx="250" cy="250" r="170" fill="url(#sealBg)"/>
+  <circle cx="250" cy="250" r="150" stroke="#93C5FD" stroke-width="6"/>
+  <circle cx="250" cy="215" r="46" fill="#F59E0B"/>
+  <path d="M160 300C190 270 220 255 250 255C280 255 310 270 340 300" stroke="#E2E8F0" stroke-width="14" stroke-linecap="round"/>
+  <path d="M205 332H295" stroke="#7DD3FC" stroke-width="10" stroke-linecap="round"/>
+  <text x="500" y="215" fill="#0F172A" font-size="96" font-family="Inter, Arial, sans-serif" font-weight="700" letter-spacing="3">SOLARIS</text>
+  <text x="500" y="285" fill="#334155" font-size="30" font-family="Inter, Arial, sans-serif" font-weight="500" letter-spacing="1.4">AI FOR ENERGY ACCESS PLANNING</text>
+</svg>

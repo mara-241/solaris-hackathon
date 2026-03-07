@@ -1,0 +1,12 @@
+<svg width="1600" height="500" viewBox="0 0 1600 500" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <rect width="1600" height="500" fill="#F8FAFC"/>
+  <g transform="translate(120,70)">
+    <rect x="0" y="0" width="360" height="360" rx="80" fill="#0B2545"/>
+    <path d="M80 258C130 210 180 185 240 185C260 185 278 188 295 194" stroke="#E2E8F0" stroke-width="14" stroke-linecap="round"/>
+    <circle cx="242" cy="136" r="50" fill="#F59E0B"/>
+    <path d="M120 286H300" stroke="#38BDF8" stroke-width="12" stroke-linecap="round"/>
+    <path d="M188 98L204 82M242 66V44M296 98L312 82" stroke="#7DD3FC" stroke-width="7" stroke-linecap="round"/>
+  </g>
+  <text x="560" y="215" fill="#0F172A" font-size="98" font-family="Inter, Arial, sans-serif" font-weight="700" letter-spacing="2.5">SOLARIS</text>
+  <text x="563" y="285" fill="#475569" font-size="32" font-family="Inter, Arial, sans-serif" font-weight="500" letter-spacing="1.2">Decision Support for Off-Grid Energy Deployment</text>
+</svg>
