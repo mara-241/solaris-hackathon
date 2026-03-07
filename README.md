@@ -11,6 +11,12 @@ Given a village (`lat/lon`, households, usage profile), produce:
 
 > Current mode: **VLM-first + deterministic optimizer**. NN training/inference is deferred for post-hackathon iteration.
 
+## Pitch Deck
+
+GitHub README does not reliably inline PDF slides, so here are direct links:
+- **View deck page:** [Solaris Pitch Deck Viewer](https://mara-241.github.io/solaris-hackathon/pitch/)
+- **Open PDF directly:** [Solaris_Pitch_Deck.pdf](https://mara-241.github.io/solaris-hackathon/pitch/Solaris_Pitch_Deck.pdf)
+
 ## Overview
 
 ```mermaid
