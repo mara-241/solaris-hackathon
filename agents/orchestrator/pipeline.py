@@ -193,7 +193,7 @@ def run_pipeline(request: dict) -> dict:
                     "error": "Spatial agent failed. Unable to fetch satellite data.",
                 },
                 "visual_embeddings_ref": None,
-                "fallback_used": False,
+                "fallback_used": True,
                 "data_unavailable": True,
             },
             error_flag="spatial_error",
